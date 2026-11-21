@@ -1,0 +1,40 @@
+# lejepa: LeJEPA — JEPA prediction + SIGReg, no EMA, no stop-gradient
+# Reference: arXiv 2511.08544 (Balestriero & LeCun)
+# Backbone: ViT-Base (~86M params)
+name: lejepa
+mode: lejepa
+
+# ViT-Base backbone
+patch_size: 8
+embed_dim: 768
+depth: 12
+num_heads: 12
+mlp_ratio: 4.0
+drop_rate: 0.0
+attn_drop_rate: 0.0
+# Projection head: embed_dim → proj_dim for 2048-dim LP features (competition format)
+# Trained end-to-end via VCReg on projected space. Predictor stays in embed_dim space.
+proj_dim: 2048
+
+# Predictor (narrow ViT)
+predictor_depth: 6
+predictor_pred_dim: 384   # narrow internal dim (I-JEPA style) — keeps predictor ~16M params
+predictor_num_heads: 6
+# cross_attention: mask tokens query context (paper original)
+# self_attention: legacy concat + self-attn
+predictor_type: cross_attention
+
+# JEPA masking
+mask_ratio: 0.75
+n_target_blocks: 4
+
+# Mask curriculum: empieza con bloques grandes (fácil) → pequeños (difícil)
+mask_curriculum: true
+mask_scale_start: [0.20, 0.80]
+mask_scale_end: [0.05, 0.30]
+
+# SIGReg (Epps-Pulley characteristic function test)
+sigreg_lambda: 0.2
+sigreg_num_proj: 512
+
+grad_checkpointing: false

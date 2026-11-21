@@ -1,0 +1,47 @@
+# LeJEPA-CVPR: Base Hydra Configuration
+# CVPR 2026 — Foundation Models for General CT Image Diagnosis
+#
+# SSL pretraining del encoder sobre FLARE-Task4-CT-FM (Coreset Track)
+#
+# Override desde CLI:
+#   python scripts/pretrain.py encoder=jepa_ema
+#   python scripts/pretrain.py encoder=lejepa_diff_local encoder.sigreg_lambda=0.05
+#   python scripts/pretrain.py trainer.devices=2
+
+defaults:
+  - encoder: lejepa           # lejepa | jepa_ema | lejepa_diff_local | lejepa_diff_global
+  - data: flare_ct_full       # flare_ct_full (alldata track) | flare_ct_coreset
+  - trainer: h100_ddp
+  - _self_
+
+seed: 42
+compile: true                  # torch.compile encoder+predictor → GPU al 100% (requiere PyTorch 2.0+)
+pca_viz_every_n_steps: 1000   # loguear PCA features a W&B cada N steps (0 = desactivar)
+
+optimizer:
+  lr: 5e-6
+  weight_decay: 0.24  # Pillar-0 recipe (vs 0.05 default) — mayor regularización
+  betas: [0.9, 0.95]
+  # LLRD: decay per layer for ViT encoder (0.75 = standard for ViT-L)
+  # Capa 0 recibe LR × 0.75^25 ≈ 0.001× base_lr
+  layer_decay: 0.75
+
+scheduler:
+  warmup_steps: 2000
+
+checkpoint:
+  dirpath: "checkpoints/${now:%Y-%m-%d_%H-%M-%S}_${encoder.name}"
+  every_n_train_steps: 1000
+  save_top_k: 3
+  filename: "ep{epoch}-step{step}-loss{train/total_loss:.4f}"
+
+wandb:
+  project: lejepa-ct-3d
+  name: "${encoder.name}_ct_alldata"
+  entity: null   # set your W&B entity (or WANDB_ENTITY env var)
+
+resume: null                     # Path to checkpoint to resume from
+
+lp_eval_every_n_epochs: 3       # LP eval sobre AMOS val cada N epochs
+lp_data_dir: ${oc.env:LEJEPA_DATA_ROOT,./data}/cvpr26_downstream/AMOS-clf-tr-val
+lp_max_samples: null            # null = todos los volúmenes; int = limitar (smoke test)

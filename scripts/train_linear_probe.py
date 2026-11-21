@@ -1,0 +1,351 @@
+"""
+Entrenamiento de cabeza lineal (Linear Probe) sobre embeddings precomputados.
+
+Compatible con los embeddings generados por eval_extract_features.py.
+Replica la metodología de evaluación de CT-NEXUS/inference.py.
+
+Uso:
+    # Entrenar y evaluar todas las tareas AMOS
+    python scripts/train_linear_probe.py \\
+        --embeds_root $LEJEPA_DATA_ROOT/lejepa_embeddings/AMOS-clf-tr-val \\
+        --labels_root $LEJEPA_DATA_ROOT/cvpr26_downstream/AMOS-clf-tr-val/labels \\
+        --output_dir  $LEJEPA_DATA_ROOT/lejepa_lp_results \\
+        --dataset     AMOS-clf-tr-val
+
+    # Solo una tarea
+    python scripts/train_linear_probe.py \\
+        --embeds_root $LEJEPA_DATA_ROOT/lejepa_embeddings/AMOS-clf-tr-val \\
+        --labels_root $LEJEPA_DATA_ROOT/cvpr26_downstream/AMOS-clf-tr-val/labels \\
+        --output_dir  $LEJEPA_DATA_ROOT/lejepa_lp_results \\
+        --dataset     AMOS-clf-tr-val \\
+        --task        splenomegaly
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+
+import h5py
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, Dataset
+from torchmetrics import AUROC, Accuracy, AveragePrecision, F1Score, Recall, Specificity, MetricCollection
+from tqdm import tqdm
+
+# ---------------------------------------------------------------------------
+# Tasas de todos los datasets
+# ---------------------------------------------------------------------------
+ALL_TASKS = {
+    "AMOS-clf-tr-val": [
+        "adrenal_hyperplasia", "ascites", "atherosclerosis", "cholecystitis",
+        "colorectal_cancer", "fatty_liver", "gallstone", "hydronephrosis",
+        "kidney_stone", "liver_calcifications", "liver_cyst", "liver_lesion",
+        "lymphadenopathy", "renal_cyst", "splenomegaly",
+    ],
+    "COVID-CT":  ["covid"],
+    "LUNA25":    ["malignancy"],
+}
+
+
+class BalancedAccuracy(nn.Module):
+    """Macro-averaged balanced accuracy (sensitivity per class)."""
+    def __init__(self, num_classes: int):
+        super().__init__()
+        self.num_classes = num_classes
+
+    def forward(self, preds: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        recall_per_class = []
+        for c in range(self.num_classes):
+            mask = target == c
+            if mask.sum() == 0:
+                continue
+            recall_per_class.append((preds[mask] == c).float().mean())
+        return torch.stack(recall_per_class).mean()
+
+
+class EmbeddingsDataset(Dataset):
+    def __init__(self, h5_dir: Path, labels_csv: Path, task: str):
+        self.paths = sorted(h5_dir.glob("*.h5"))
+        df = pd.read_csv(labels_csv)
+        self.label_map = {
+            row["case_id"].replace(".nii.gz", ""): int(row[task])
+            for _, row in df.iterrows()
+        }
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, i):
+        path = self.paths[i]
+        case_id = path.stem
+        label = self.label_map.get(case_id)
+        if label is None:
+            raise ValueError(f"{case_id} no encontrado en CSV")
+        with h5py.File(path, "r") as hf:
+            feat = torch.tensor(hf["y_hat"][:], dtype=torch.float32)
+        return feat, torch.tensor(label, dtype=torch.long)
+
+    def embed_dim(self):
+        with h5py.File(self.paths[0], "r") as hf:
+            return hf["y_hat"].shape[0]
+
+    def num_classes(self):
+        return len(set(self.label_map.values()))
+
+
+def train_head(
+    train_ds: EmbeddingsDataset,
+    val_ds: EmbeddingsDataset,
+    embed_dim: int,
+    num_classes: int,
+    device: torch.device,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    max_epochs: int = 100,
+    patience: int = 20,
+    batch_size: int = 256,
+) -> tuple[nn.Linear, dict]:
+    """Entrena una cabeza lineal y retorna (best_head, best_val_metrics)."""
+    head = nn.Linear(embed_dim, num_classes).to(device)
+    opt  = torch.optim.AdamW(head.parameters(), lr=lr, weight_decay=weight_decay)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max_epochs)
+
+    # class-balanced loss
+    labels = [int(train_ds[i][1]) for i in range(len(train_ds))]
+    counts = torch.bincount(torch.tensor(labels), minlength=num_classes).float()
+    weights = (1.0 / (counts + 1e-6))
+    weights = (weights / weights.sum() * num_classes).to(device)
+    criterion = nn.CrossEntropyLoss(weight=weights)
+
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4, pin_memory=True)
+    val_dl   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    val_auroc_metric = AUROC(task="multiclass", num_classes=num_classes).to(device)
+
+    best_auroc  = -1.0
+    best_state  = None
+    best_metrics = {}
+    no_improve  = 0
+
+    for epoch in range(max_epochs):
+        head.train()
+        for xb, yb in train_dl:
+            xb, yb = xb.to(device), yb.to(device)
+            opt.zero_grad()
+            loss = criterion(head(xb), yb)
+            loss.backward()
+            opt.step()
+        sched.step()
+
+        # Validación
+        head.eval()
+        all_probs, all_labels = [], []
+        with torch.no_grad():
+            for xb, yb in val_dl:
+                xb, yb = xb.to(device), yb.to(device)
+                probs = torch.softmax(head(xb), dim=1)
+                all_probs.append(probs)
+                all_labels.append(yb)
+
+        all_probs  = torch.cat(all_probs)
+        all_labels = torch.cat(all_labels)
+        all_preds  = all_probs.argmax(1)
+
+        auroc = val_auroc_metric(all_probs, all_labels).item()
+        val_auroc_metric.reset()
+
+        # balanced acc
+        bal_acc = BalancedAccuracy(num_classes).to(device)(all_preds, all_labels).item()
+
+        if auroc > best_auroc:
+            best_auroc   = auroc
+            best_state   = {k: v.clone() for k, v in head.state_dict().items()}
+            best_metrics = {"val_auroc": auroc, "val_bal_acc": bal_acc, "epoch": epoch}
+            no_improve   = 0
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                break
+
+    head.load_state_dict(best_state)
+    return head, best_metrics
+
+
+@torch.no_grad()
+def evaluate_head(
+    head: nn.Linear,
+    ds: EmbeddingsDataset,
+    num_classes: int,
+    device: torch.device,
+    batch_size: int = 256,
+) -> dict:
+    """Evalúa la cabeza lineal y retorna métricas."""
+    dl = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    head.eval()
+
+    metrics = MetricCollection({
+        "acc":          Accuracy(task="multiclass", num_classes=num_classes),
+        "f1":           F1Score(task="multiclass", num_classes=num_classes, average="macro"),
+        "auroc":        AUROC(task="multiclass", num_classes=num_classes),
+        "ap":           AveragePrecision(task="multiclass", num_classes=num_classes),
+        "sensitivity":  Recall(task="multiclass", num_classes=num_classes, average="macro"),
+        "specificity":  Specificity(task="multiclass", num_classes=num_classes, average="macro"),
+    }).to(device)
+
+    all_probs, all_labels = [], []
+    for xb, yb in dl:
+        xb, yb = xb.to(device), yb.to(device)
+        probs  = torch.softmax(head(xb), dim=1)
+        all_probs.append(probs)
+        all_labels.append(yb)
+
+    all_probs  = torch.cat(all_probs)
+    all_labels = torch.cat(all_labels)
+    all_preds  = all_probs.argmax(1)
+
+    result = {k: v.item() for k, v in metrics(all_probs, all_labels).items()}
+    result["balanced_acc"] = BalancedAccuracy(num_classes).to(device)(all_preds, all_labels).item()
+    result["n_samples"] = len(ds)
+    return result
+
+
+def run_task(
+    task: str,
+    embeds_root: Path,
+    labels_root: Path,
+    output_dir: Path,
+    device: torch.device,
+    lr: float,
+    weight_decay: float,
+    max_epochs: int,
+    batch_size: int,
+) -> dict | None:
+    train_dir = embeds_root / task / "train"
+    val_dir   = embeds_root / task / "val"
+    labels_csv = labels_root / f"{task}.csv"
+
+    for d in [train_dir, val_dir]:
+        if not d.exists() or not list(d.glob("*.h5")):
+            print(f"  [skip] {task}: faltan embeddings en {d}")
+            return None
+
+    if not labels_csv.exists():
+        print(f"  [skip] {task}: no hay CSV en {labels_csv}")
+        return None
+
+    train_ds = EmbeddingsDataset(train_dir, labels_csv, task)
+    val_ds   = EmbeddingsDataset(val_dir,   labels_csv, task)
+
+    embed_dim   = train_ds.embed_dim()
+    num_classes = train_ds.num_classes()
+
+    print(f"  {task}: {len(train_ds)} train / {len(val_ds)} val | embed_dim={embed_dim} | classes={num_classes}")
+
+    head, val_metrics = train_head(
+        train_ds, val_ds, embed_dim, num_classes, device,
+        lr=lr, weight_decay=weight_decay, max_epochs=max_epochs, batch_size=batch_size,
+    )
+
+    # Guardar checkpoint de la cabeza lineal
+    task_out = output_dir / task
+    task_out.mkdir(parents=True, exist_ok=True)
+    ckpt_path = task_out / f"head_val_auroc{val_metrics['val_auroc']:.4f}.pth"
+    torch.save({"state_dict": {"0.weight": head.weight, "0.bias": head.bias},
+                "val_metrics": val_metrics,
+                "embed_dim": embed_dim,
+                "num_classes": num_classes}, ckpt_path)
+
+    # Evaluar en val
+    test_dir = embeds_root / task / "test"
+    eval_ds  = val_ds
+    eval_split = "val"
+    if test_dir.exists() and list(test_dir.glob("*.h5")):
+        try:
+            eval_ds    = EmbeddingsDataset(test_dir, labels_csv, task)
+            eval_split = "test"
+        except Exception:
+            pass
+
+    test_metrics = evaluate_head(head, eval_ds, num_classes, device, batch_size)
+    test_metrics["split_evaluated"] = eval_split
+
+    # Guardar métricas
+    result = {"task": task, **val_metrics, **{f"test_{k}": v for k, v in test_metrics.items()}}
+    with open(task_out / "metrics.json", "w") as f:
+        json.dump(result, f, indent=2)
+
+    bal_acc = test_metrics["balanced_acc"]
+    auroc   = test_metrics["auroc"]
+    print(f"    → BalAcc={bal_acc:.4f}  AUROC={auroc:.4f}  ({eval_split})")
+
+    return result
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Linear Probe training sobre embeddings LeJEPA")
+    ap.add_argument("--embeds_root",  required=True, help="Root dir con embeddings (con subdirs por tarea)")
+    ap.add_argument("--labels_root",  required=True, help="Root dir con CSVs de labels por tarea")
+    ap.add_argument("--output_dir",   required=True, help="Donde guardar checkpoints y métricas")
+    ap.add_argument("--dataset",      default="AMOS-clf-tr-val", help="Nombre del dataset (para lookup de tareas)")
+    ap.add_argument("--task",         default=None,  help="Tarea específica (default: todas)")
+    ap.add_argument("--lr",           type=float, default=1e-3)
+    ap.add_argument("--weight_decay", type=float, default=1e-4)
+    ap.add_argument("--max_epochs",   type=int,   default=100)
+    ap.add_argument("--batch_size",   type=int,   default=256)
+    ap.add_argument("--device",       default="cuda")
+    args = ap.parse_args()
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    embeds_root = Path(args.embeds_root)
+    labels_root = Path(args.labels_root)
+    output_dir  = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    tasks = ALL_TASKS.get(args.dataset, [])
+    if args.task:
+        tasks = [args.task]
+
+    print(f"Dataset: {args.dataset} | {len(tasks)} tareas | device: {device}")
+
+    all_results = []
+    for task in tasks:
+        result = run_task(
+            task=task,
+            embeds_root=embeds_root,
+            labels_root=labels_root,
+            output_dir=output_dir,
+            device=device,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            max_epochs=args.max_epochs,
+            batch_size=args.batch_size,
+        )
+        if result:
+            all_results.append(result)
+
+    if all_results:
+        df = pd.DataFrame(all_results)
+        summary_path = output_dir / "lp_results_summary.csv"
+        df.to_csv(summary_path, index=False)
+        print(f"\nResumen guardado en: {summary_path}")
+
+        # Imprimir tabla resumen
+        print("\n" + "="*60)
+        print(f"{'Task':<25} {'BalAcc':>8} {'AUROC':>8}")
+        print("="*60)
+        for r in all_results:
+            print(f"  {r['task']:<23} {r.get('test_balanced_acc', 0):.4f}   {r.get('test_auroc', 0):.4f}")
+        avg_bal = np.mean([r.get("test_balanced_acc", 0) for r in all_results])
+        avg_auc = np.mean([r.get("test_auroc", 0) for r in all_results])
+        print("-"*60)
+        print(f"  {'MEAN':<23} {avg_bal:.4f}   {avg_auc:.4f}")
+        print("="*60)
+
+
+if __name__ == "__main__":
+    main()

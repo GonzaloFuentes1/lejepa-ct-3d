@@ -1,0 +1,45 @@
+# Secrets
+.env
+.envrc
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+.pytest_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+.mypy_cache/
+
+# Data & checkpoints (demasiado grandes para git)
+checkpoints/
+wandb/
+outputs/
+*.npy
+*.nii.gz
+*.h5
+*.hdf5
+
+# Papers (PDFs)
+papers/
+
+# Logs
+*.log
+nohup.out
+
+# IDE / Claude
+.claude/
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# uv / pip
+uv.lock

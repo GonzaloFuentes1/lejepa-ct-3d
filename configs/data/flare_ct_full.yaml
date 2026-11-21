@@ -1,0 +1,41 @@
+# FLARE-Task4-CT-FM — Preentrenamiento SSL con dataset completo (AllData Track)
+#
+# Dataset: FLARE-MedFM/FLARE-Task4-CT-FM (~668GB, ~133K scans)
+#   - Múltiples fuentes: AMOS, FLARE22/23, LiTS, MSD, TotalSegmentator, etc.
+#   - 1 canal, HU windowing estándar para CT de cuerpo completo
+#
+# Reglas del challenge:
+#   - Track: AllData (100% del pretrain set, preentrenado desde cero)
+#   - Prohibido supervised finetuning en Task 1 LP
+#
+# Estimaciones de escala (B_eff=128, 4×H100):
+#   ~133K scans → ~1044 steps/epoch
+#   100K steps  → ~96 "pasadas" efectivas sobre el dataset
+#   Tiempo ViT-H: ~3.9h para 100K steps (data loading puede ser cuello de botella)
+
+dataset: flare_ct
+data_dir: ${oc.env:LEJEPA_DATA_ROOT,./data}/flare_ct_pretrain_full
+in_channels: 4  # Multi-windowing Pillar-0: soft tissue, lung, bone, mediastinum
+num_classes: 1          # Solo pretrain — no se usa
+# (96, 160, 160) @ 1.5mm: 144mm depth × 240mm in-plane
+# Tokens: (12, 20, 20) = 4800 con patch_size=8  [ctx 25%=1200, tgt ~1200]
+patch_size: [96, 160, 160]
+spacing: [1.5, 1.5, 1.5]
+batch_size_per_gpu: 32
+num_workers: 16
+prefetch_factor: 4
+cache_num: 0
+npy_dir: ${oc.env:LEJEPA_DATA_ROOT,./data}/flare_ct_pretrain_full_npy
+cropfirst: false         # npy_dir tiene prioridad sobre cropfirst
+
+# Normalización CT
+norm_mode: hu_window
+hu_min: -1000
+hu_max: 1000
+
+# 95/5 split: con 133K scans, 5% ya son ~6700 volúmenes de validación
+val_split: 0.05
+
+# Escanear solo subdirectorios de entrenamiento (excluye val_downstream)
+train_subdirs: [train_part1, train_part2]
+coreset_manifest: null

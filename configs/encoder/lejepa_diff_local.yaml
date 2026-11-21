@@ -1,0 +1,27 @@
+# lejepa_diff_local: LeJEPA + DDPM sobre patch embeddings locales condicionado en contexto
+# Reference: arXiv 2511.08544 + arXiv 2603.19312 (LeWorldModel)
+# Backbone: ViT-Large (~307M params)
+name: lejepa_diff_local
+mode: lejepa_diff_local
+
+patch_size: 16
+embed_dim: 1024
+depth: 24
+num_heads: 16
+mlp_ratio: 4.0
+drop_rate: 0.0
+attn_drop_rate: 0.0
+
+mask_ratio: 0.75
+n_target_blocks: 4
+
+# SIGReg
+sigreg_lambda: 0.1
+sigreg_num_proj: 512
+
+# Diffusion score network
+score_depth: 4
+flow_steps: 10            # Euler steps for inference (not used during training)
+
+# Gradient checkpointing
+grad_checkpointing: false

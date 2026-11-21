@@ -1,0 +1,37 @@
+# FLARE-Task4-CT-FM — Preentrenamiento SSL con Coreset Track
+#
+# Dataset: FLARE-MedFM/FLARE-Task4-CT-FM
+#   - Volúmenes CT 3D de múltiples fuentes (AMOS, FLARE, LiTS, MSD, etc.)
+#   - 1 canal, HU windowing estándar para CT de cuerpo completo
+#   - Coreset: 10% seleccionado de forma estratificada por fuente
+#
+# Reglas del challenge:
+#   - Track: Coreset (10% del pretrain set, preentrenado desde cero)
+#   - Prohibido supervised finetuning en Task 1 LP
+
+dataset: flare_ct
+data_dir: ${oc.env:LEJEPA_DATA_ROOT,./data}/flare_ct_pretrain_full
+in_channels: 1
+num_classes: 1          # Solo pretrain — no se usa
+patch_size: [96, 160, 160]
+spacing: [1.5, 1.5, 1.5]
+batch_size_per_gpu: 64
+num_workers: 32
+prefetch_factor: 6
+cache_num: 0
+npy_dir: ${oc.env:LEJEPA_DATA_ROOT,./data}/flare_ct_pretrain_full_npy
+cropfirst: false         # npy_dir tiene prioridad sobre cropfirst
+
+# Normalización CT: HU windowing
+# Rango [-1000, 1000] HU cubre la mayoría de tejidos (aire, grasa, tejidos blandos, hueso)
+# Luego se recorta y normaliza a [0, 1]
+norm_mode: hu_window
+hu_min: -1000
+hu_max: 1000
+
+# 90/10 train/val split del coreset
+val_split: 0.10
+
+# Escanear solo subdirectorios de entrenamiento (excluye val_downstream)
+train_subdirs: [train_part1, train_part2]
+coreset_manifest: ${oc.env:LEJEPA_DATA_ROOT,./data}/flare_ct_pretrain_full/coreset_manifest.json

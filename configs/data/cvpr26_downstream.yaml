@@ -1,0 +1,45 @@
+# CVPR26-3DCTFMCompetition — Downstream classification tasks
+#
+# Dataset: kmin06/CVPR26-3DCTFMCompetition
+#   - 17 tareas de clasificación binaria
+#   - 3 datasets: AMOS (abdominal), BraTS23 (cerebral), NLST (chest)
+#   - Etiquetas en CSV por tarea
+#
+# Usado para: linear probing (Task 1) y EAO (Task 2)
+
+dataset: cvpr26_downstream
+data_dir: ${oc.env:LEJEPA_DATA_ROOT,./data}/cvpr26_downstream
+in_channels: 1
+patch_size: [96, 96, 96]
+spacing: [1.5, 1.5, 1.5]
+batch_size_per_gpu: 4
+num_workers: 8
+cache_num: 0
+
+# Normalización CT: HU windowing (igual que pretrain)
+norm_mode: hu_window
+hu_min: -1000
+hu_max: 1000
+
+# Las 17 tareas binarias del challenge
+tasks:
+  # AMOS — CT abdominal (12 tasks)
+  - adrenal_hyperplasia
+  - aortic_aneurysm
+  - gallbladder_stone
+  - hepatic_cyst
+  - hepatocellular_carcinoma
+  - kidney_cyst
+  - kidney_stone
+  - liver_cirrhosis
+  - ovarian_cyst
+  - pancreatic_cancer
+  - renal_cell_carcinoma
+  - spleen_enlargement
+  # BraTS 2023 — cerebral MRI/CT (3 tasks)
+  - brain_tumor_grade
+  - mgmt_methylation
+  - brain_idh_mutation
+  # NLST — CT de pecho (2 tasks)
+  - lung_cancer
+  - lung_nodule

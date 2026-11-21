@@ -1,0 +1,37 @@
+# jepa_ema: Classic I-JEPA — context encoder + EMA target encoder
+# Reference: Assran et al. (I-JEPA), arXiv 2301.08243
+# Backbone: ViT-Base (~86M params)
+name: jepa_ema
+mode: jepa_ema
+
+patch_size: 8
+embed_dim: 768
+depth: 12
+num_heads: 12
+mlp_ratio: 4.0
+drop_rate: 0.0
+attn_drop_rate: 0.0
+# Projection head: embed_dim → proj_dim for 2048-dim LP features (competition format)
+proj_dim: 2048
+
+predictor_depth: 6
+predictor_pred_dim: 384
+predictor_num_heads: 6
+predictor_type: cross_attention
+
+mask_ratio: 0.75
+n_target_blocks: 4
+
+# EMA cosine schedule: τ_start → τ_end (DINOv2 / MAE-v2 style)
+# τ_start: updates frecuentes cuando representaciones son caóticas (inicio)
+# τ_end: targets más estables cuando representaciones convergen (final)
+ema_momentum: 0.999           # Legacy — usado si no hay start/end
+ema_momentum_start: 0.996
+ema_momentum_end: 0.9999
+
+# Mask curriculum
+mask_curriculum: true
+mask_scale_start: [0.20, 0.80]
+mask_scale_end: [0.05, 0.30]
+
+grad_checkpointing: false
