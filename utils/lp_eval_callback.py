@@ -1,14 +1,14 @@
 """
 Linear Probing Evaluation Callback — CVPR 2026 AMOS downstream tasks.
 
-Cada `every_n_epochs` epochs:
-  1. Extrae features de todos los volúmenes AMOS (train + val splits)
-     usando el encoder actual (sin gradiente, en eval mode)
-  2. Entrena LogisticRegression sobre split=train por tarea
-  3. Evalúa sobre split=val → BalAcc + AUROC
-  4. Loguea a W&B en sección val/lp/
+Every `every_n_epochs` epochs:
+  1. Extracts features of all AMOS volumes (train + val splits)
+     using the current encoder (no gradient, in eval mode)
+  2. Trains LogisticRegression on split=train per task
+  3. Evaluates on split=val → BalAcc + AUROC
+  4. Logs to W&B under section val/lp/
 
-Solo se ejecuta en rank 0 (DDP-safe).
+Runs on rank 0 only (DDP-safe).
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ def _build_mask_transforms():
 
 def _load_labels(label_dir: Path) -> Dict[str, Dict[str, tuple]]:
     """
-    Retorna {task: {case_id: (label, split)}} para todos los tasks disponibles.
+    Returns {task: {case_id: (label, split)}} for all available tasks.
     """
     data: Dict[str, Dict[str, tuple]] = {}
     for task in TASKS:
@@ -102,15 +102,15 @@ def _load_labels(label_dir: Path) -> Dict[str, Dict[str, tuple]]:
 
 class LPEvalCallback(Callback):
     """
-    Evalúa linear probing sobre las 15 tareas AMOS cada `every_n_epochs` epochs.
+    Evaluates linear probing on the 15 AMOS tasks every `every_n_epochs` epochs.
 
     Args:
-        data_dir:        Path a AMOS-clf-tr-val/ (contiene images/, labels/, fg_masks/)
-        every_n_epochs:  Frecuencia de evaluación en epochs (default 3)
-        max_samples:     Limitar número de volúmenes (None = todos)
-        vol_cache_dir:   Dir para cachear volúmenes preprocesados como .npy.
-                         El preprocesamiento MONAI (~3-4s/vol) solo corre la primera vez.
-                         Si None, usa data_dir/lp_vol_cache/.
+        data_dir:        Path to AMOS-clf-tr-val/ (contains images/, labels/, fg_masks/)
+        every_n_epochs:  Evaluation frequency in epochs (default 3)
+        max_samples:     Limit the number of volumes (None = all)
+        vol_cache_dir:   Dir to cache preprocessed volumes as .npy.
+                         MONAI preprocessing (~3-4s/vol) only runs the first time.
+                         If None, uses data_dir/lp_vol_cache/.
     """
 
     def __init__(
@@ -143,7 +143,7 @@ class LPEvalCallback(Callback):
     # ------------------------------------------------------------------
 
     def _load_vol(self, case_id: str, nifti_path: Path) -> torch.Tensor:
-        """Carga volumen preprocesado desde cache .npy o corre MONAI y cachea."""
+        """Loads a preprocessed volume from the .npy cache, or runs MONAI and caches it."""
         import time
         cache_path = self.vol_cache_dir / f"{case_id}.npy"
         if cache_path.exists():
@@ -169,8 +169,8 @@ class LPEvalCallback(Callback):
         device: torch.device,
     ) -> Optional[torch.Tensor]:
         """
-        Retorna roi_mask (1, N_tokens) bool en device, o None si no hay máscara.
-        Cachea el downsampled mask como .npy para evitar re-correr MONAI.
+        Returns roi_mask (1, N_tokens) bool on device, or None if there is no mask.
+        Caches the downsampled mask as .npy to avoid re-running MONAI.
         """
         if not mask_nifti.exists():
             return None
@@ -181,7 +181,7 @@ class LPEvalCallback(Callback):
             if self._msk_tfm is None:
                 self._msk_tfm = _build_mask_transforms()
             mdata       = self._msk_tfm({"mask": str(mask_nifti)})
-            # Mover a GPU para que avg_pool3d sea rápido
+            # Move to GPU so avg_pool3d is fast
             mask_tensor = mdata["mask"].unsqueeze(0).to(device)
             if mask_tensor.shape[2:] != vol_shape:
                 mask_tensor = F.interpolate(mask_tensor, size=vol_shape, mode="nearest")
@@ -203,9 +203,9 @@ class LPEvalCallback(Callback):
         world_size: int = 1,
     ) -> Dict[str, np.ndarray]:
         """
-        Extrae features para todos los casos que aparecen en los CSVs.
-        Cada rank procesa rank::world_size casos para paralelizar.
-        Retorna {case_id: feat_array (out_dim,)} para global y por ROI task.
+        Extracts features for all cases that appear in the CSVs.
+        Each rank processes rank::world_size cases to parallelize.
+        Returns {case_id: feat_array (out_dim,)} for global and per ROI task.
         """
         img_dir   = self.data_dir / "images"
         mask_root = self.data_dir / "fg_masks"
@@ -224,7 +224,7 @@ class LPEvalCallback(Callback):
         cases_list = sorted(all_cases)
         if self.max_samples is not None:
             cases_list = cases_list[: self.max_samples]
-        # Cada rank procesa su slice del dataset
+        # Each rank processes its slice of the dataset
         local_cases = cases_list[rank::world_size]
         print(f"[LP rank{rank}] processing {len(local_cases)} cases: {local_cases}", flush=True)
 
@@ -269,11 +269,11 @@ class LPEvalCallback(Callback):
             except Exception as e:
                 import traceback
                 print(f"[LP rank{rank}] EXCEPTION {case_id}: {e}\n{traceback.format_exc()}", flush=True)
-                log.warning(f"LPEvalCallback: error en {case_id}: {e}")
+                log.warning(f"LPEvalCallback: error in {case_id}: {e}")
                 torch.cuda.empty_cache()
 
             if (i + 1) % 10 == 0:
-                log.info(f"  rank{rank}: {i+1}/{len(local_cases)} volúmenes procesados")
+                log.info(f"  rank{rank}: {i+1}/{len(local_cases)} volumes processed")
 
         return global_feats, roi_feats
 
@@ -285,7 +285,7 @@ class LPEvalCallback(Callback):
         roi_feats: Dict[str, Dict[str, np.ndarray]],
     ) -> Dict[str, Dict[str, float]]:
         """
-        Corre LogisticRegression por tarea. Retorna {task: {bacc, auroc, vs_curia}}.
+        Runs LogisticRegression per task. Returns {task: {bacc, auroc, vs_curia}}.
         """
         from sklearn.linear_model import LogisticRegression
         from sklearn.metrics import balanced_accuracy_score, roc_auc_score
@@ -346,7 +346,7 @@ class LPEvalCallback(Callback):
         rank       = trainer.global_rank
         world_size = trainer.world_size
 
-        # Todos los ranks deben estar de acuerdo en salir o continuar
+        # All ranks must agree to exit or continue
         if (epoch + 1) % self.every_n_epochs != 0:
             return
         if not self.labels:
@@ -356,19 +356,19 @@ class LPEvalCallback(Callback):
             import wandb
         except ImportError:
             if rank == 0:
-                log.warning("LPEvalCallback: wandb no disponible, saltando LP eval")
+                log.warning("LPEvalCallback: wandb not available, skipping LP eval")
             return
 
         import torch.distributed as dist
         _ddp = dist.is_available() and dist.is_initialized() and world_size > 1
 
-        # Barrier de entrada: todos los ranks deben llegar juntos antes de empezar.
-        # Evita que el watchdog de NCCL detecte inactividad asimétrica.
+        # Entry barrier: all ranks must arrive together before starting.
+        # Prevents the NCCL watchdog from detecting asymmetric inactivity.
         if _ddp:
             dist.barrier()
 
         if rank == 0:
-            log.info(f"\n[LPEvalCallback] Epoch {epoch+1} — iniciando LP eval sobre AMOS val...")
+            log.info(f"\n[LPEvalCallback] Epoch {epoch+1} - starting LP eval on AMOS val...")
         device = pl_module.device
         encoder = pl_module.encoder
 
@@ -378,7 +378,7 @@ class LPEvalCallback(Callback):
         local_global, local_roi = self._extract_features(encoder, device, rank, world_size)
         eager_encoder.train()
 
-        # Juntar resultados de todos los ranks
+        # Gather results from all ranks
         if _ddp:
             all_global: List[Dict] = [None] * world_size
             all_roi:    List[Dict] = [None] * world_size
@@ -394,9 +394,9 @@ class LPEvalCallback(Callback):
         else:
             global_feats, roi_feats = local_global, local_roi
 
-        # Los ranks no-0 esperan aquí a que rank 0 termine el logging (barrier de salida).
-        # Sin esto, rank 0 puede tardar minutos en _run_lp mientras NCCL considera
-        # al grupo bloqueado y dispara un timeout.
+        # Non-0 ranks wait here for rank 0 to finish logging (exit barrier).
+        # Without this, rank 0 can take minutes in _run_lp while NCCL considers
+        # the group blocked and fires a timeout.
         if rank != 0:
             if _ddp:
                 dist.barrier()
@@ -426,13 +426,13 @@ class LPEvalCallback(Callback):
         if trainer.logger is not None:
             trainer.logger.experiment.log(log_dict)
 
-        # Resumen en consola
+        # Console summary
         beats = sum(1 for r in results.values() if r["vs_curia"] > 0)
         log.info(
             f"[LP Epoch {epoch+1}] mean_bacc={mean_bacc:.3f}  mean_auroc={mean_auroc:.3f}"
             f"  vs_curia={mean_vs_curia:+.3f}  beats_curia={beats}/{len(results)}"
         )
 
-        # Barrier de salida (rank 0): libera a los otros ranks que esperaban en su barrier.
+        # Exit barrier (rank 0): releases the other ranks waiting at their barrier.
         if _ddp:
             dist.barrier()

@@ -1,25 +1,25 @@
 """
-Feature extraction para la competición CVPR 2026 — Task 1 (LP).
+Feature extraction for the CVPR 2026 competition, Task 1 (LP).
 
-Carga un encoder ViT3D desde un checkpoint Lightning, procesa volúmenes CT
-y guarda embeddings en formato .h5 compatible con run_LP.py del repo oficial.
+Loads a ViT3D encoder from a Lightning checkpoint, processes CT volumes
+and saves embeddings in .h5 format compatible with run_LP.py of the official repo.
 
-Formato de salida (por .nii.gz de entrada):
+Output format (per input .nii.gz):
     outputs/<casename>.h5
-        y_hat: np.float32, shape (embed_dim,)  ← mean-pool de tokens válidos
+        y_hat: np.float32, shape (embed_dim,)  ← mean-pool of valid tokens
 
-ROI masking (enfermedades con ROI):
-    Si se pasa --masks_dir, se carga la máscara binaria correspondiente al caso
-    y se hace mean-pool solo sobre los tokens que solapan con la ROI.
+ROI masking (diseases with ROI):
+    If --masks_dir is given, the binary mask corresponding to the case is loaded
+    and mean-pooling is done only over the tokens overlapping the ROI.
 
-Uso:
-    # Sin ROI (atherosclerosis, colorectal_cancer, ascites, lymphadenopathy)
+Usage:
+    # Without ROI (atherosclerosis, colorectal_cancer, ascites, lymphadenopathy)
     python scripts/extract_features.py \\
         --ckpt checkpoints/best.ckpt \\
         --input_dir /workspace/inputs \\
         --output_dir /workspace/outputs
 
-    # Con ROI (splenomegaly, adrenal_hyperplasia, etc.)
+    # With ROI (splenomegaly, adrenal_hyperplasia, etc.)
     python scripts/extract_features.py \\
         --ckpt checkpoints/best.ckpt \\
         --input_dir /workspace/inputs \\
@@ -48,7 +48,7 @@ from monai.transforms import (
 )
 
 # ---------------------------------------------------------------------------
-# Config (debe coincidir con el encoder del checkpoint)
+# Config (must match the checkpoint encoder)
 # ---------------------------------------------------------------------------
 PATCH_SIZE    = 16
 SPACING       = (1.5, 1.5, 1.5)
@@ -57,7 +57,7 @@ HU_MAX        = 1000.0
 
 
 def _load_env(path: str | None = None) -> None:
-    """Lee .env manualmente (sin python-dotenv)."""
+    """Reads .env manually (without python-dotenv)."""
     search = [Path(path)] if path else [
         Path(__file__).parent,
         Path(__file__).parent.parent,
@@ -75,7 +75,7 @@ def _load_env(path: str | None = None) -> None:
 
 
 def _build_transforms() -> Compose:
-    """Transforms CT estándar sin crop ni augmentación."""
+    """Standard CT transforms without crop or augmentation."""
     keys = ["image"]
     return Compose([
         LoadImaged(keys=keys),
@@ -93,7 +93,7 @@ def _build_transforms() -> Compose:
 
 
 def _build_mask_transforms() -> Compose:
-    """Transforms para máscara binaria (nn → no interpolation)."""
+    """Transforms for binary mask (nn → no interpolation)."""
     keys = ["mask"]
     return Compose([
         LoadImaged(keys=keys),
@@ -114,14 +114,14 @@ def extract_one(
     multi_layer: bool = False,   # legacy: kept for backward compatibility
 ) -> np.ndarray:
     """
-    Encoda un volumen y devuelve un embedding 1-D listo para LP.
+    Encodes a volume and returns a 1-D embedding ready for LP.
 
-    Usa encoder.project() → output dim = encoder.out_dim (2048 si proj_head activo).
-    Si mask != None, aplica ROI-masked pooling antes de proyectar.
+    Uses encoder.project() → output dim = encoder.out_dim (2048 if proj_head is active).
+    If mask != None, applies ROI-masked pooling before projecting.
     """
     tokens = encoder(volume).squeeze(0)  # (N, embed_dim)
 
-    # Construir máscara ROI a nivel de token si hay máscara de voxels
+    # Build the ROI mask at token level if there is a voxel mask
     roi_mask = None
     if mask is not None:
         m_down = F.avg_pool3d(mask.float(), kernel_size=patch_size, stride=patch_size)
@@ -147,9 +147,9 @@ def main() -> None:
         "--multi_layer",
         action="store_true",
         help=(
-            "Concatenar features de los últimos 4 layers del encoder "
-            "(capas 8, 16, 20, depth-1) → embedding de dim 4×embed_dim. "
-            "Mejora downstream classification sin costo de pretraining."
+            "Concatenate features from the last 4 encoder layers "
+            "(layers 8, 16, 20, depth-1) → embedding of dim 4×embed_dim. "
+            "Improves downstream classification at no pretraining cost."
         ),
     )
     args = ap.parse_args()
@@ -158,9 +158,9 @@ def main() -> None:
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    # --- cargar encoder desde checkpoint ---
-    print(f"Cargando checkpoint: {args.ckpt}")
-    from models.encoder.lejepa_module import LeJEPAModule  # import relativo al repo
+    # --- load encoder from checkpoint ---
+    print(f"Loading checkpoint: {args.ckpt}")
+    from models.encoder.lejepa_module import LeJEPAModule  # import relative to the repo
 
     module = LeJEPAModule.load_from_checkpoint(args.ckpt, map_location="cpu")
     encoder = module.encoder.to(device).eval()
@@ -169,45 +169,45 @@ def main() -> None:
     del module
     torch.cuda.empty_cache()
 
-    feat_dim = encoder.out_dim   # 2048 si proj_dim=2048, 1024 si no hay proj_head
-    print(f"Encoder out_dim: {feat_dim} (competencia espera 2048)")
+    feat_dim = encoder.out_dim   # 2048 if proj_dim=2048, 1024 if there is no proj_head
+    print(f"Encoder out_dim: {feat_dim} (competition expects 2048)")
 
     # --- transforms ---
     img_tfm  = _build_transforms()
     msk_tfm  = _build_mask_transforms() if args.masks_dir else None
 
-    # --- listar volúmenes ---
+    # --- list volumes ---
     input_dir = Path(args.input_dir)
     cases = sorted(input_dir.glob("*.nii.gz"))
     if not cases:
         cases = sorted(input_dir.glob("*.nii"))
-    print(f"Procesando {len(cases)} volúmenes...")
+    print(f"Processing {len(cases)} volumes...")
 
     for i, case_path in enumerate(cases, 1):
         case_name = case_path.name.replace(".nii.gz", "").replace(".nii", "")
         out_path  = Path(args.output_dir) / f"{case_name}.h5"
 
         if out_path.exists():
-            print(f"  [{i}/{len(cases)}] {case_name} — ya existe, saltando")
+            print(f"  [{i}/{len(cases)}] {case_name} - already exists, skipping")
             continue
 
         print(f"  [{i}/{len(cases)}] {case_name}", end="", flush=True)
 
         try:
-            # --- cargar imagen ---
+            # --- load image ---
             data = img_tfm({"image": str(case_path)})
             vol  = data["image"].unsqueeze(0).to(device)  # (1, 1, D, H, W)
             if args.fp16:
                 vol = vol.half()
 
-            # --- cargar máscara ROI (si aplica) ---
+            # --- load ROI mask (if applicable) ---
             mask_tensor = None
             if args.masks_dir is not None:
                 mask_path = Path(args.masks_dir) / case_path.name
                 if mask_path.exists():
                     mdata = msk_tfm({"mask": str(mask_path)})
                     mask_tensor = mdata["mask"].unsqueeze(0).to(device)  # (1, 1, D, H, W)
-                    # Resize máscara al tamaño del volumen resampled si es necesario
+                    # Resize the mask to the resampled volume size if necessary
                     if mask_tensor.shape[2:] != vol.shape[2:]:
                         mask_tensor = F.interpolate(
                             mask_tensor,
@@ -215,14 +215,14 @@ def main() -> None:
                             mode="nearest",
                         )
                 else:
-                    print(f" [WARN: máscara no encontrada, usando global pool]", end="")
+                    print(f" [WARN: mask not found, using global pool]", end="")
 
-            # --- extraer embedding ---
+            # --- extract embedding ---
             feat = extract_one(encoder, vol, mask_tensor, PATCH_SIZE, device,
                                multi_layer=args.multi_layer)
-            assert feat.shape == (feat_dim,), f"Shape inesperado: {feat.shape}"
+            assert feat.shape == (feat_dim,), f"Unexpected shape: {feat.shape}"
 
-            # --- guardar .h5 ---
+            # --- save .h5 ---
             with h5py.File(out_path, "w") as hf:
                 hf.create_dataset("y_hat", data=feat, dtype="float32")
 
@@ -232,7 +232,7 @@ def main() -> None:
             print(f" ✗ ERROR: {e}")
             import traceback; traceback.print_exc()
 
-    print(f"\nListo. Embeddings guardados en: {args.output_dir}")
+    print(f"\nDone. Embeddings saved in: {args.output_dir}")
 
 
 if __name__ == "__main__":

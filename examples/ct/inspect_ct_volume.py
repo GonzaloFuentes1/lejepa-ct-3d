@@ -1,15 +1,15 @@
 """
-Inspección de un volumen CT del CVPR26 challenge.
+Inspection of a CT volume from the CVPR26 challenge.
 
-Carga un volumen NIfTI CT, aplica HU windowing, y guarda:
-  - Slices axial/coronal/sagital como PNG
-  - Histograma de valores HU antes y después del windowing
-  - Estadísticas básicas del volumen (shape, spacing, HU stats)
+Loads a CT NIfTI volume, applies HU windowing, and saves:
+  - Axial/coronal/sagittal slices as PNG
+  - Histogram of HU values before and after windowing
+  - Basic volume statistics (shape, spacing, HU stats)
 
-Uso:
+Usage:
     cd .
-    python examples/ct/inspect_ct_volume.py --nifti /ruta/al/volumen.nii.gz
-    python examples/ct/inspect_ct_volume.py --auto   # usa primer volumen disponible
+    python examples/ct/inspect_ct_volume.py --nifti /path/to/volume.nii.gz
+    python examples/ct/inspect_ct_volume.py --auto   # uses the first available volume
 """
 
 from __future__ import annotations
@@ -30,13 +30,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 try:
     import nibabel as nib
 except ImportError:
-    print("Instala nibabel: uv pip install nibabel")
+    print("Install nibabel: uv pip install nibabel")
     sys.exit(1)
 
 OUT = Path(__file__).parent / "outputs"
 OUT.mkdir(exist_ok=True, parents=True)
 
-# HU windowing del challenge
+# Challenge HU windowing
 HU_MIN = -1000.0
 HU_MAX  =  1000.0
 
@@ -59,7 +59,7 @@ ACCENT2 = "#34d399"
 
 
 def load_nifti_volume(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Carga un NIfTI y devuelve (array HxWxD float32, voxel_spacing)."""
+    """Loads a NIfTI and returns (HxWxD float32 array, voxel_spacing)."""
     img = nib.load(str(path))
     vol = img.get_fdata(dtype=np.float32)
     zooms = np.abs(np.array(img.header.get_zooms()[:3], dtype=np.float32))
@@ -67,7 +67,7 @@ def load_nifti_volume(path: Path) -> tuple[np.ndarray, np.ndarray]:
 
 
 def hu_window(vol: np.ndarray, hu_min: float, hu_max: float) -> np.ndarray:
-    """Clip HU range y rescale a [0, 1]."""
+    """Clip HU range and rescale to [0, 1]."""
     clipped = np.clip(vol, hu_min, hu_max)
     return (clipped - hu_min) / (hu_max - hu_min)
 
@@ -104,11 +104,11 @@ def plot_slices(vol_raw: np.ndarray, vol_norm: np.ndarray, path: Path, title: st
     out_path = path / "slices.png"
     fig.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
-    print(f"  ✓  Slices guardados: {out_path}")
+    print(f"  ✓  Slices saved: {out_path}")
 
 
 def plot_histogram(vol_raw: np.ndarray, path: Path) -> None:
-    """Histograma de HU: completo vs rango útil."""
+    """HU histogram: full vs useful range."""
     fig, axes = plt.subplots(1, 2, figsize=(14, 4))
     fig.patch.set_facecolor("#0f172a")
 
@@ -121,28 +121,28 @@ def plot_histogram(vol_raw: np.ndarray, path: Path) -> None:
 
     # HU completo
     axes[0].hist(flat, bins=256, color=ACCENT, alpha=0.85, edgecolor="none")
-    axes[0].set_title("Distribución HU completa", fontsize=11)
+    axes[0].set_title("Full HU distribution", fontsize=11)
     axes[0].set_xlabel("HU value")
-    axes[0].set_ylabel("Vóxeles")
+    axes[0].set_ylabel("Voxels")
     axes[0].axvline(HU_MIN, color="#f87171", linestyle="--", linewidth=1.5, label=f"HU_MIN={HU_MIN:.0f}")
     axes[0].axvline(HU_MAX, color="#fb923c", linestyle="--", linewidth=1.5, label=f"HU_MAX={HU_MAX:.0f}")
     axes[0].legend(fontsize=9)
 
-    # Solo rango de windowing
+    # Windowing range only
     windowed_flat = flat[(flat >= HU_MIN) & (flat <= HU_MAX)]
     axes[1].hist(windowed_flat, bins=256, color=ACCENT2, alpha=0.85, edgecolor="none")
-    axes[1].set_title(f"HU en [{HU_MIN:.0f}, {HU_MAX:.0f}] (windowing)", fontsize=11)
+    axes[1].set_title(f"HU in [{HU_MIN:.0f}, {HU_MAX:.0f}] (windowing)", fontsize=11)
     axes[1].set_xlabel("HU value")
 
     fig.tight_layout()
     out_path = path / "histogram.png"
     fig.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
-    print(f"  ✓  Histograma guardado: {out_path}")
+    print(f"  ✓  Histogram saved: {out_path}")
 
 
 def print_stats(vol: np.ndarray, spacing: np.ndarray, path: Path) -> None:
-    """Imprime y guarda estadísticas del volumen."""
+    """Prints and saves volume statistics."""
     stats = {
         "shape":        list(vol.shape),
         "spacing_mm":   spacing.tolist(),
@@ -158,7 +158,7 @@ def print_stats(vol: np.ndarray, spacing: np.ndarray, path: Path) -> None:
     }
 
     print()
-    print("  Estadísticas del volumen CT:")
+    print("  CT volume statistics:")
     print(f"    Shape:          {stats['shape']}")
     print(f"    Spacing (mm):   {[f'{s:.2f}' for s in stats['spacing_mm']]}")
     print(f"    FOV (mm):       {[f'{v:.1f}' for v in stats['fov_mm']]}")
@@ -171,11 +171,11 @@ def print_stats(vol: np.ndarray, spacing: np.ndarray, path: Path) -> None:
     stats_path = path / "stats.json"
     with open(stats_path, "w") as f:
         json.dump(stats, f, indent=2)
-    print(f"  ✓  Stats guardadas: {stats_path}")
+    print(f"  ✓  Stats saved: {stats_path}")
 
 
 def find_first_volume(data_root: Path) -> Path | None:
-    """Busca el primer .nii.gz en la estructura del downstream dataset."""
+    """Finds the first .nii.gz in the downstream dataset structure."""
     search_dirs = [
         data_root / "cvpr26_downstream",
         data_root / "flare_ct_pretrain" / "volumes",
@@ -190,53 +190,53 @@ def find_first_volume(data_root: Path) -> Path | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Inspecciona un volumen CT (HU windowing, slices, histograma)",
+        description="Inspect a CT volume (HU windowing, slices, histogram)",
     )
     parser.add_argument(
         "--nifti", type=str, default=None,
-        help="Ruta al archivo .nii.gz a inspeccionar",
+        help="Path to the .nii.gz file to inspect",
     )
     parser.add_argument(
         "--auto", action="store_true",
-        help="Buscar automáticamente el primer volumen disponible",
+        help="Automatically find the first available volume",
     )
     parser.add_argument(
         "--data_root", type=str, default=os.environ.get("LEJEPA_DATA_ROOT", "./data"),
-        help="Raíz de datos (para --auto)",
+        help="Data root (for --auto)",
     )
     parser.add_argument(
         "--out", type=str, default=None,
-        help="Directorio de salida para las imágenes (default: examples/ct/outputs/)",
+        help="Output directory for the images (default: examples/ct/outputs/)",
     )
     args = parser.parse_args()
 
-    # Resolver ruta del volumen
+    # Resolve the volume path
     if args.nifti:
         nifti_path = Path(args.nifti)
     elif args.auto:
         nifti_path = find_first_volume(Path(args.data_root))
         if nifti_path is None:
-            print("No se encontró ningún volumen .nii.gz en data_root.")
-            print("Descarga los datos primero:")
+            print("No .nii.gz volume found in data_root.")
+            print("Download the data first:")
             print("  python scripts/download_ct_datasets.py --downstream")
             sys.exit(1)
-        print(f"  → Usando: {nifti_path}")
+        print(f"  → Using: {nifti_path}")
     else:
         parser.print_help()
-        print("\n  Especifica --nifti <ruta> o usa --auto")
+        print("\n  Specify --nifti <path> or use --auto")
         sys.exit(0)
 
     if not nifti_path.exists():
-        print(f"Archivo no encontrado: {nifti_path}")
+        print(f"File not found: {nifti_path}")
         sys.exit(1)
 
     out_dir = Path(args.out) if args.out else OUT / nifti_path.stem
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\nInspeccionando: {nifti_path.name}")
-    print(f"Salida en:      {out_dir}")
+    print(f"\nInspecting: {nifti_path.name}")
+    print(f"Output in:      {out_dir}")
 
-    # Cargar y procesar
+    # Load and process
     vol_raw, spacing = load_nifti_volume(nifti_path)
     vol_norm = hu_window(vol_raw, HU_MIN, HU_MAX)
 
@@ -245,7 +245,7 @@ def main() -> None:
     plot_slices(vol_raw, vol_norm, out_dir, title=nifti_path.name)
     plot_histogram(vol_raw, out_dir)
 
-    print(f"\n  ✓  Inspección completa → {out_dir}/\n")
+    print(f"\n  ✓  Inspection complete → {out_dir}/\n")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# eval_pipeline.sh — Pipeline completo de evaluación LP para LeJEPA
+# eval_pipeline.sh — Full LP evaluation pipeline for LeJEPA
 #
-# Uso:
+# Usage:
 #   bash scripts/eval_pipeline.sh <checkpoint.ckpt> [output_dir]
 #
-# Ejemplo:
+# Example:
 #   bash scripts/eval_pipeline.sh checkpoints/lejepa_best.ckpt $LEJEPA_DATA_ROOT/lejepa_eval
 #
-# Requiere: source .venv/bin/activate
+# Requires: source .venv/bin/activate
 
 set -euo pipefail
 
@@ -18,12 +18,12 @@ DOWNSTREAM_ROOT="$DATA_ROOT/cvpr26_downstream"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [[ -z "$CKPT" ]]; then
-    echo "Uso: bash scripts/eval_pipeline.sh <checkpoint.ckpt> [output_dir]"
+    echo "Usage: bash scripts/eval_pipeline.sh <checkpoint.ckpt> [output_dir]"
     exit 1
 fi
 
 if [[ ! -f "$CKPT" ]]; then
-    echo "Error: checkpoint no encontrado: $CKPT"
+    echo "Error: checkpoint not found: $CKPT"
     exit 1
 fi
 
@@ -41,15 +41,15 @@ echo "=============================================="
 cd "$REPO_ROOT"
 
 # -------------------------------------------------------
-# PASO 1: Extraer features para todos los datasets
+# STEP 1: Extract features for all datasets
 # -------------------------------------------------------
 echo ""
-echo "[1/3] Extrayendo features..."
+echo "[1/3] Extracting features..."
 
 for DATASET in AMOS-clf-tr-val COVID-CT LUNA25; do
     DATASET_DIR="${DOWNSTREAM_ROOT}/${DATASET}"
     if [[ ! -d "$DATASET_DIR" ]]; then
-        echo "  [skip] Dataset no encontrado: $DATASET_DIR"
+        echo "  [skip] Dataset not found: $DATASET_DIR"
         continue
     fi
     echo "  Dataset: $DATASET"
@@ -61,16 +61,16 @@ for DATASET in AMOS-clf-tr-val COVID-CT LUNA25; do
 done
 
 # -------------------------------------------------------
-# PASO 2: Entrenar y evaluar cabezas lineales
+# STEP 2: Train and evaluate linear heads
 # -------------------------------------------------------
 echo ""
-echo "[2/3] Entrenando linear probes..."
+echo "[2/3] Training linear probes..."
 
 for DATASET in AMOS-clf-tr-val COVID-CT LUNA25; do
     EMBEDS_DATASET="${EMBEDS_ROOT}/${DATASET}"
     LABELS_DIR="${DOWNSTREAM_ROOT}/${DATASET}/labels"
     if [[ ! -d "$EMBEDS_DATASET" ]]; then
-        echo "  [skip] Embeddings no encontrados: $EMBEDS_DATASET"
+        echo "  [skip] Embeddings not found: $EMBEDS_DATASET"
         continue
     fi
     echo "  Dataset: $DATASET"
@@ -84,10 +84,10 @@ for DATASET in AMOS-clf-tr-val COVID-CT LUNA25; do
 done
 
 # -------------------------------------------------------
-# PASO 3: Comparar contra baselines
+# STEP 3: Compare against baselines
 # -------------------------------------------------------
 echo ""
-echo "[3/3] Generando tabla comparativa..."
+echo "[3/3] Generating comparison table..."
 
 python scripts/compare_baselines.py \
     --lp_results_root "$LP_RESULTS" \
@@ -95,6 +95,6 @@ python scripts/compare_baselines.py \
 
 echo ""
 echo "=============================================="
-echo "  Pipeline completo."
-echo "  Tabla: ${EVAL_ROOT}/comparison_table.csv"
+echo "  Pipeline complete."
+echo "  Table: ${EVAL_ROOT}/comparison_table.csv"
 echo "=============================================="

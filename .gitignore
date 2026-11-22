@@ -17,7 +17,7 @@ build/
 .ruff_cache/
 .mypy_cache/
 
-# Data & checkpoints (demasiado grandes para git)
+# Data & checkpoints (too large for git)
 checkpoints/
 wandb/
 outputs/

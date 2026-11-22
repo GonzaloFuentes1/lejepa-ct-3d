@@ -6,11 +6,11 @@ precision: bf16-mixed         # H100 natively supports bf16, faster than fp16
 sync_batchnorm: true
 
 # SSL pretraining
-# 100K steps @ ~130ms/step (ViT-L, B=32/GPU, 4×H100) ≈ 3.6 horas
-# 100K steps @ ~140ms/step (ViT-H, B=16/GPU, 4×H100) ≈ 3.9 horas
+# 100K steps @ ~130ms/step (ViT-L, B=32/GPU, 4×H100) ≈ 3.6 hours
+# 100K steps @ ~140ms/step (ViT-H, B=16/GPU, 4×H100) ≈ 3.9 hours
 max_steps: 100000
 accumulate_grad_batches: 1    # effective batch = batch_size_per_gpu * devices * accum
                               # ViT-L B=32: 32*4*1=128 | ViT-H B=16: 16*4*1=64
 gradient_clip_val: 1.0
 log_every_n_steps: 50
-val_check_interval: 5000   # steps entre validaciones (evita pauses largas)
+val_check_interval: 5000   # steps between validations (avoids long pauses)

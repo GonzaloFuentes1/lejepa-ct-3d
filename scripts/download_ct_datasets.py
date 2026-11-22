@@ -1,5 +1,5 @@
 """
-Descarga de datasets CT para la competencia CVPR 2026:
+Download of CT datasets for the CVPR 2026 competition:
   Foundation Models for General CT Image Diagnosis
   https://www.codabench.org/competitions/12650/
 
@@ -7,35 +7,35 @@ Datasets:
   - PRETRAIN : FLARE-MedFM/FLARE-Task4-CT-FM   (~668 GB full / ~67 GB coreset 10%)
   - DOWNSTREAM: kmin06/CVPR26-3DCTFMCompetition  (17 binary classification tasks)
 
-Uso:
-    # TODO de una vez — coreset (~67 GB) + downstream (recomendado)
+Usage:
+    # Everything at once: coreset (~67 GB) + downstream (recommended)
     python scripts/download_ct_datasets.py --all
 
-    # TODO de una vez — full pretrain (~668 GB) + downstream
+    # Everything at once: full pretrain (~668 GB) + downstream
     python scripts/download_ct_datasets.py --all --track alldata
 
-    # Solo downstream (rápido, ~pocos GB — necesario para validar)
+    # Downstream only (fast, a few GB, needed for validation)
     python scripts/download_ct_datasets.py --downstream
 
-    # Solo coreset de pretrain (~67 GB)
+    # Pretrain coreset only (~67 GB)
     python scripts/download_ct_datasets.py --pretrain --track coreset
 
-    # Ver qué hay disponible sin descargar nada
+    # See what is available without downloading anything
     python scripts/download_ct_datasets.py --list
 
-    # Verificar descargas ya hechas
+    # Verify downloads already made
     python scripts/download_ct_datasets.py --verify
 
-Variables de entorno (.env):
-    HF_TOKEN=hf_...   (requerido — token de HuggingFace con acceso a los repos)
+Environment variables (.env):
+    HF_TOKEN=hf_...   (required: HuggingFace token with access to the repos)
 
-Estructura de salida:
+Output structure:
     data_dir/
-        flare_ct_pretrain/          ← volúmenes CT para SSL (coreset)
+        flare_ct_pretrain/          ← CT volumes for SSL (coreset)
             <source>/
                 <case_id>.nii.gz
-            coreset_manifest.json   ← lista de archivos seleccionados
-        cvpr26_downstream/          ← tasks de clasificación binaria
+            coreset_manifest.json   ← list of selected files
+        cvpr26_downstream/          ← binary classification tasks
             AMOS-clf-tr-val/
                 train/
                 val/
@@ -59,14 +59,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 def _load_dotenv() -> None:
-    """Carga variables de .env sin depender de python-dotenv."""
+    """Loads variables from .env without depending on python-dotenv."""
     try:
         from dotenv import load_dotenv
         load_dotenv()
         return
     except ImportError:
         pass
-    # Fallback: parser manual buscando .env desde el directorio actual hacia arriba
+    # Fallback: manual parser looking for .env from the current directory upwards
     here = Path(__file__).resolve().parent
     for candidate in [here, here.parent, Path.cwd()]:
         env_file = candidate / ".env"
@@ -86,7 +86,7 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Colores para la terminal
+# Terminal colors
 # ---------------------------------------------------------------------------
 
 def _ok(msg: str)   -> None: print(f"  \033[92m✓\033[0m  {msg}")
@@ -97,15 +97,15 @@ def _hdr(msg: str)  -> None: print(f"\n\033[1m{msg}\033[0m")
 
 
 # ---------------------------------------------------------------------------
-# Configuración de los repos HuggingFace
+# HuggingFace repos configuration
 # ---------------------------------------------------------------------------
 
 HF_PRETRAIN_REPO  = "FLARE-MedFM/FLARE-Task4-CT-FM"
 HF_DOWNSTREAM_REPO = "kmin06/CVPR26-3DCTFMCompetition"
-CORESET_FRACTION   = 0.10   # 10% del total para Coreset Track
+CORESET_FRACTION   = 0.10   # 10% of the total for the Coreset Track
 RANDOM_SEED        = 42
 
-# Las 17 tareas de clasificación binaria del challenge
+# The 17 binary classification tasks of the challenge
 DOWNSTREAM_TASKS = [
     # AMOS (abdominal CT) — 12 tasks
     "adrenal_hyperplasia",
@@ -131,26 +131,26 @@ DOWNSTREAM_TASKS = [
 
 
 def _get_hf_token() -> str:
-    """Lee el token de HF desde el entorno. Falla limpiamente si no existe."""
+    """Reads the HF token from the environment. Fails cleanly if it does not exist."""
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_TOKEN")
     if not token:
-        _err("No se encontró HF_TOKEN en el entorno.")
+        _err("HF_TOKEN not found in the environment.")
         print()
-        print("  Añade a tu .env:")
+        print("  Add to your .env:")
         print("    HF_TOKEN=hf_...")
         print()
-        print("  O exporta antes de ejecutar:")
+        print("  Or export before running:")
         print("    export HF_TOKEN=hf_...")
         sys.exit(1)
     return token
 
 
 def _ensure_huggingface_hub() -> None:
-    """Instala huggingface_hub si no está disponible."""
+    """Installs huggingface_hub if it is not available."""
     try:
         import huggingface_hub  # noqa: F401
     except ImportError:
-        _info("Instalando huggingface_hub...")
+        _info("Installing huggingface_hub...")
         import subprocess
         if shutil.which("uv"):
             subprocess.check_call(["uv", "pip", "install", "-q", "huggingface_hub>=0.23.0"])
@@ -159,11 +159,11 @@ def _ensure_huggingface_hub() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Utilidad: listado de archivos en un repo HF
+# Utility: list of files in an HF repo
 # ---------------------------------------------------------------------------
 
 def _list_repo_files(repo_id: str, token: str, repo_type: str = "dataset") -> List[str]:
-    """Devuelve la lista de rutas de archivos en un repo HF."""
+    """Returns the list of file paths in an HF repo."""
     from huggingface_hub import list_repo_files
     files = list(list_repo_files(repo_id, repo_type=repo_type, token=token))
     return files
@@ -174,20 +174,20 @@ def _list_repo_files(repo_id: str, token: str, repo_type: str = "dataset") -> Li
 # ---------------------------------------------------------------------------
 
 def download_downstream(out_dir: Path, token: str) -> None:
-    _hdr(f"Descargando downstream: {HF_DOWNSTREAM_REPO}")
+    _hdr(f"Downloading downstream: {HF_DOWNSTREAM_REPO}")
 
     dst = out_dir / "cvpr26_downstream"
     dst.mkdir(parents=True, exist_ok=True)
 
     if _verify_downstream(out_dir)["ok"]:
-        _ok(f"Downstream ya descargado en {dst} — omitiendo")
-        _info("Usa --verify para revisar la integridad")
+        _ok(f"Downstream already downloaded in {dst}, skipping")
+        _info("Use --verify to check integrity")
         return
 
     from huggingface_hub import snapshot_download
 
-    _info(f"Destino: {dst}")
-    _info("Descargando con snapshot_download (reanudable)...")
+    _info(f"Destination: {dst}")
+    _info("Downloading with snapshot_download (resumable)...")
 
     try:
         snapshot_download(
@@ -199,14 +199,14 @@ def download_downstream(out_dir: Path, token: str) -> None:
             resume_download=True,
         )
     except Exception as e:
-        _err(f"Error durante la descarga: {e}")
-        _info("Si hay error de acceso, asegúrate de haber aceptado los términos en:")
+        _err(f"Error during download: {e}")
+        _info("If there is an access error, make sure you accepted the terms at:")
         _info(f"  https://huggingface.co/datasets/{HF_DOWNSTREAM_REPO}")
         sys.exit(1)
 
     stats = _verify_downstream(out_dir)
-    _ok(f"Downstream descargado: {stats['n_volumes']} volúmenes, {stats['n_labels']} archivos de labels")
-    _info(f"Ruta: {dst}")
+    _ok(f"Downstream downloaded: {stats['n_volumes']} volumes, {stats['n_labels']} label files")
+    _info(f"Path: {dst}")
 
 
 def _verify_downstream(out_dir: Path) -> Dict:
@@ -226,50 +226,50 @@ def _verify_downstream(out_dir: Path) -> Dict:
 # ---------------------------------------------------------------------------
 
 def list_pretrain_files(token: str) -> None:
-    """Lista los archivos disponibles en el repo de pretrain (sin descargar)."""
-    _hdr(f"Archivos en {HF_PRETRAIN_REPO}")
+    """Lists the files available in the pretrain repo (without downloading)."""
+    _hdr(f"Files in {HF_PRETRAIN_REPO}")
     _ensure_huggingface_hub()
 
-    _info("Listando archivos (puede tardar unos segundos)...")
+    _info("Listing files (may take a few seconds)...")
     try:
         files = _list_repo_files(HF_PRETRAIN_REPO, token)
     except Exception as e:
-        _err(f"No se pudo listar el repo: {e}")
+        _err(f"Could not list the repo: {e}")
         sys.exit(1)
 
-    # Agrupar por subdirectorio/fuente
+    # Group by subdirectory/source
     sources: Dict[str, int] = {}
     for f in files:
         parts = Path(f).parts
         source = parts[0] if len(parts) > 1 else "root"
         sources[source] = sources.get(source, 0) + 1
 
-    _ok(f"Total: {len(files)} archivos")
+    _ok(f"Total: {len(files)} files")
     print()
-    print("  Distribución por fuente:")
+    print("  Distribution by source:")
     for src, count in sorted(sources.items(), key=lambda x: -x[1]):
-        print(f"    {src:40s}  {count:>6d} archivos")
+        print(f"    {src:40s}  {count:>6d} files")
 
 
 def _select_coreset(files: List[str], fraction: float, seed: int) -> List[str]:
     """
-    Selecciona una fracción estratificada de los archivos de pretrain.
+    Selects a stratified fraction of the pretrain files.
 
-    Estrategia:
-      1. Agrupar por fuente/subdirectorio (proxy de dataset de origen).
-      2. Dentro de cada grupo, muestreo aleatorio uniforme de `fraction`.
-      3. Garantizar mínimo 1 muestra por grupo.
+    Strategy:
+      1. Group by source/subdirectory (proxy for the originating dataset).
+      2. Within each group, uniform random sampling of `fraction`.
+      3. Guarantee at least 1 sample per group.
 
-    Esto asegura diversidad anatómica y de dominio en el coreset.
+    This ensures anatomical and domain diversity in the coreset.
     """
-    # Solo archivos NIfTI
+    # NIfTI files only
     nifti_files = [f for f in files if f.endswith(".nii.gz") or f.endswith(".nii")]
 
     if not nifti_files:
-        _warn("No se encontraron archivos .nii.gz — usando todos los archivos")
+        _warn("No .nii.gz files found, using all files")
         nifti_files = files
 
-    # Agrupar por primer directorio
+    # Group by first directory
     groups: Dict[str, List[str]] = {}
     for f in nifti_files:
         src = Path(f).parts[0] if len(Path(f).parts) > 1 else "root"
@@ -282,52 +282,52 @@ def _select_coreset(files: List[str], fraction: float, seed: int) -> List[str]:
         n = max(1, math.ceil(len(group_files) * fraction))
         sampled = rng.sample(group_files, min(n, len(group_files)))
         selected.extend(sampled)
-        _info(f"  {src}: {len(sampled)}/{len(group_files)} archivos seleccionados")
+        _info(f"  {src}: {len(sampled)}/{len(group_files)} files selected")
 
     total_pct = 100 * len(selected) / len(nifti_files) if nifti_files else 0
-    _ok(f"Coreset: {len(selected)} archivos ({total_pct:.1f}% del total)")
+    _ok(f"Coreset: {len(selected)} files ({total_pct:.1f}% of the total)")
 
     return selected
 
 
 def download_pretrain_coreset(out_dir: Path, token: str) -> None:
-    _hdr(f"Descargando pretrain coreset ({int(CORESET_FRACTION*100)}%): {HF_PRETRAIN_REPO}")
+    _hdr(f"Downloading pretrain coreset ({int(CORESET_FRACTION*100)}%): {HF_PRETRAIN_REPO}")
     _ensure_huggingface_hub()
 
     dst = out_dir / "flare_ct_pretrain"
     manifest_path = dst / "coreset_manifest.json"
 
     if manifest_path.exists():
-        _ok(f"Manifiesto de coreset ya existe en {manifest_path}")
+        _ok(f"Coreset manifest already exists at {manifest_path}")
         with open(manifest_path) as f:
             manifest = json.load(f)
         existing = [
             p for p in (dst / "volumes").glob("**/*.nii.gz")
         ]
         if len(existing) >= len(manifest["files"]) * 0.95:
-            _ok(f"Coreset ya descargado: {len(existing)} archivos — omitiendo")
+            _ok(f"Coreset already downloaded: {len(existing)} files, skipping")
             return
-        _info(f"Descarga incompleta: {len(existing)}/{len(manifest['files'])} — reanudando")
+        _info(f"Incomplete download: {len(existing)}/{len(manifest['files'])}, resuming")
         selected = manifest["files"]
     else:
         dst.mkdir(parents=True, exist_ok=True)
 
-        # Listar archivos disponibles
-        _info("Listando archivos del repo de pretrain...")
+        # List available files
+        _info("Listing files of the pretrain repo...")
         try:
             all_files = _list_repo_files(HF_PRETRAIN_REPO, token)
         except Exception as e:
-            _err(f"No se pudo listar el repo: {e}")
-            _info(f"Verifica que tienes acceso: https://huggingface.co/datasets/{HF_PRETRAIN_REPO}")
+            _err(f"Could not list the repo: {e}")
+            _info(f"Check that you have access: https://huggingface.co/datasets/{HF_PRETRAIN_REPO}")
             sys.exit(1)
 
-        _info(f"Total de archivos en el repo: {len(all_files)}")
+        _info(f"Total files in the repo: {len(all_files)}")
 
-        # Seleccionar coreset estratificado
-        _hdr("Seleccionando coreset estratificado")
+        # Select stratified coreset
+        _hdr("Selecting stratified coreset")
         selected = _select_coreset(all_files, CORESET_FRACTION, RANDOM_SEED)
 
-        # Guardar manifiesto para reproducibilidad y reanudación
+        # Save manifest for reproducibility and resuming
         manifest = {
             "repo": HF_PRETRAIN_REPO,
             "track": "coreset",
@@ -339,9 +339,9 @@ def download_pretrain_coreset(out_dir: Path, token: str) -> None:
         }
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
-        _ok(f"Manifiesto guardado: {manifest_path}")
+        _ok(f"Manifest saved: {manifest_path}")
 
-    # Descargar archivos seleccionados uno a uno (permite reanudar)
+    # Download selected files one by one (allows resuming)
     from huggingface_hub import hf_hub_download
 
     vol_dir = dst / "volumes"
@@ -352,8 +352,8 @@ def download_pretrain_coreset(out_dir: Path, token: str) -> None:
     n_failed = 0
     total    = len(selected)
 
-    _hdr(f"Descargando {total} archivos (~{total * 0.1:.0f} GB estimado)")
-    _info("Reanuda el script si se interrumpe — los archivos ya descargados se omiten")
+    _hdr(f"Downloading {total} files (~{total * 0.1:.0f} GB estimated)")
+    _info("Rerun the script if interrupted; already downloaded files are skipped")
     print()
 
     for i, rel_path in enumerate(selected, 1):
@@ -362,7 +362,7 @@ def download_pretrain_coreset(out_dir: Path, token: str) -> None:
         if local_path.exists() and local_path.stat().st_size > 0:
             n_skip += 1
             if i % 100 == 0:
-                print(f"  [{i:>5}/{total}] {n_done} descargados, {n_skip} omitidos, {n_failed} fallidos")
+                print(f"  [{i:>5}/{total}] {n_done} downloaded, {n_skip} skipped, {n_failed} failed")
             continue
 
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -386,21 +386,21 @@ def download_pretrain_coreset(out_dir: Path, token: str) -> None:
             print(f"  [{i:>5}/{total}] {pct:.1f}% — ✓ {n_done}  ⊘ {n_skip}  ✗ {n_failed}")
 
     print()
-    _ok(f"Coreset descargado: {n_done + n_skip} archivos en {vol_dir}")
+    _ok(f"Coreset downloaded: {n_done + n_skip} files in {vol_dir}")
     if n_failed:
-        _warn(f"{n_failed} archivos fallidos — ejecuta de nuevo para reintentarlos")
+        _warn(f"{n_failed} failed files, run again to retry them")
 
 
 def download_pretrain_alldata(out_dir: Path, token: str) -> None:
-    """All Data Track — descarga TODO el repo de pretrain (~668 GB)."""
-    _hdr(f"Descargando pretrain FULL DATA (~668 GB): {HF_PRETRAIN_REPO}")
-    _warn("¡Este proceso puede tardar muchas horas y ocupa ~668 GB!")
-    _warn("Considera usar --track coreset para el Coreset Track (~67 GB).")
+    """All Data Track: downloads the ENTIRE pretrain repo (~668 GB)."""
+    _hdr(f"Downloading pretrain FULL DATA (~668 GB): {HF_PRETRAIN_REPO}")
+    _warn("This process can take many hours and takes ~668 GB!")
+    _warn("Consider using --track coreset for the Coreset Track (~67 GB).")
     print()
 
-    response = input("  ¿Confirmas la descarga completa? [s/N]: ").strip().lower()
+    response = input("  Confirm the full download? [y/N]: ").strip().lower()
     if response not in ("s", "si", "sí", "y", "yes"):
-        _info("Descarga cancelada.")
+        _info("Download cancelled.")
         sys.exit(0)
 
     from huggingface_hub import snapshot_download
@@ -408,7 +408,7 @@ def download_pretrain_alldata(out_dir: Path, token: str) -> None:
     dst = out_dir / "flare_ct_pretrain_full"
     dst.mkdir(parents=True, exist_ok=True)
 
-    _info(f"Destino: {dst}")
+    _info(f"Destination: {dst}")
     snapshot_download(
         repo_id=HF_PRETRAIN_REPO,
         repo_type="dataset",
@@ -419,24 +419,24 @@ def download_pretrain_alldata(out_dir: Path, token: str) -> None:
     )
 
     n = len(list(dst.rglob("*.nii.gz")))
-    _ok(f"Full dataset descargado: {n} volúmenes en {dst}")
+    _ok(f"Full dataset downloaded: {n} volumes in {dst}")
 
 
 # ---------------------------------------------------------------------------
-# Verificación
+# Verification
 # ---------------------------------------------------------------------------
 
 def verify_all(out_dir: Path) -> None:
-    _hdr(f"Verificando datasets CT en {out_dir}")
+    _hdr(f"Verifying CT datasets in {out_dir}")
 
     # Downstream
     stats_ds = _verify_downstream(out_dir)
     dst_path  = out_dir / "cvpr26_downstream"
     if stats_ds["ok"]:
-        _ok(f"Downstream: {stats_ds['n_volumes']} volúmenes, {stats_ds['n_labels']} archivos de labels ({dst_path})")
+        _ok(f"Downstream: {stats_ds['n_volumes']} volumes, {stats_ds['n_labels']} label files ({dst_path})")
     else:
-        _err(f"Downstream: no encontrado en {dst_path}")
-        _info("  Ejecuta: python scripts/download_ct_datasets.py --downstream")
+        _err(f"Downstream: not found in {dst_path}")
+        _info("  Run: python scripts/download_ct_datasets.py --downstream")
 
     # Pretrain coreset
     coreset_dir  = out_dir / "flare_ct_pretrain"
@@ -447,28 +447,28 @@ def verify_all(out_dir: Path) -> None:
         n_expected = manifest["n_selected"]
         n_actual   = len(list((coreset_dir / "volumes").rglob("*.nii.gz"))) if (coreset_dir / "volumes").exists() else 0
         if n_actual >= n_expected * 0.95:
-            _ok(f"Pretrain coreset: {n_actual}/{n_expected} volúmenes ({coreset_dir})")
+            _ok(f"Pretrain coreset: {n_actual}/{n_expected} volumes ({coreset_dir})")
         else:
-            _warn(f"Pretrain coreset: {n_actual}/{n_expected} volúmenes — descarga incompleta")
-            _info("  Ejecuta de nuevo: python scripts/download_ct_datasets.py --pretrain --track coreset")
+            _warn(f"Pretrain coreset: {n_actual}/{n_expected} volumes, incomplete download")
+            _info("  Run again: python scripts/download_ct_datasets.py --pretrain --track coreset")
     else:
-        _err(f"Pretrain: no encontrado en {coreset_dir}")
-        _info("  Ejecuta: python scripts/download_ct_datasets.py --pretrain --track coreset")
+        _err(f"Pretrain: not found in {coreset_dir}")
+        _info("  Run: python scripts/download_ct_datasets.py --pretrain --track coreset")
 
     # Full pretrain
     full_dir = out_dir / "flare_ct_pretrain_full"
     if full_dir.exists():
         n_full = len(list(full_dir.rglob("*.nii.gz")))
         if n_full > 0:
-            _ok(f"Pretrain full: {n_full} volúmenes ({full_dir})")
+            _ok(f"Pretrain full: {n_full} volumes ({full_dir})")
 
     print()
-    _hdr("Próximos pasos:")
+    _hdr("Next steps:")
     if stats_ds["ok"]:
-        print("  # Configurar la data config CT")
+        print("  # Configure the CT data config")
         print("  python scripts/pretrain.py data=flare_ct_coreset")
         print()
-        print("  # Verificar carga de un volumen")
+        print("  # Verify loading of a volume")
         print("  python examples/ct/inspect_ct_volume.py")
 
 
@@ -478,52 +478,52 @@ def verify_all(out_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Descarga datasets CT para la competencia CVPR 2026",
+        description="Download CT datasets for the CVPR 2026 competition",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Ejemplos:
-  # TODO de una vez — coreset (~67 GB) + downstream (RECOMENDADO)
+Examples:
+  # Everything at once: coreset (~67 GB) + downstream (RECOMMENDED)
   python scripts/download_ct_datasets.py --all
 
-  # TODO con full pretrain (~668 GB + downstream)
+  # Everything with full pretrain (~668 GB + downstream)
   python scripts/download_ct_datasets.py --all --track alldata
 
-  # Solo downstream (pocos GB, para validación rápida)
+  # Downstream only (a few GB, for quick validation)
   python scripts/download_ct_datasets.py --downstream
 
-  # Solo coreset de pretrain (~67 GB)
+  # Pretrain coreset only (~67 GB)
   python scripts/download_ct_datasets.py --pretrain --track coreset
 
-  # Ver archivos disponibles en el repo de pretrain
+  # See files available in the pretrain repo
   python scripts/download_ct_datasets.py --list
 
-  # Verificar descargas ya realizadas
+  # Verify downloads already made
   python scripts/download_ct_datasets.py --verify
         """,
     )
     parser.add_argument(
         "--all", action="store_true",
-        help="Descargar TODO: pretrain + downstream (equivale a --pretrain --downstream)",
+        help="Download EVERYTHING: pretrain + downstream (equivalent to --pretrain --downstream)",
     )
     parser.add_argument(
         "--pretrain", action="store_true",
-        help="Descargar dataset de preentrenamiento (FLARE-Task4-CT-FM)",
+        help="Download the pretraining dataset (FLARE-Task4-CT-FM)",
     )
     parser.add_argument(
         "--downstream", action="store_true",
-        help="Descargar dataset downstream (CVPR26-3DCTFMCompetition)",
+        help="Download the downstream dataset (CVPR26-3DCTFMCompetition)",
     )
     parser.add_argument(
         "--track", choices=["coreset", "alldata"], default="coreset",
-        help="Track para el dataset de pretrain: coreset (10%%, ~67 GB) o alldata (100%%, ~668 GB) (default: coreset)",
+        help="Track for the pretrain dataset: coreset (10%%, ~67 GB) or alldata (100%%, ~668 GB) (default: coreset)",
     )
     parser.add_argument(
         "--list", action="store_true",
-        help="Listar archivos disponibles en el repo de pretrain (sin descargar)",
+        help="List files available in the pretrain repo (without downloading)",
     )
     parser.add_argument(
         "--verify", action="store_true",
-        help="Verificar integridad de los datasets ya descargados",
+        help="Verify integrity of the already downloaded datasets",
     )
     parser.add_argument(
         "--out", type=str, default=os.environ.get("LEJEPA_DATA_ROOT", "./data"),
@@ -531,14 +531,14 @@ Ejemplos:
     )
     args = parser.parse_args()
 
-    # --all expande a --pretrain --downstream
+    # --all expands to --pretrain --downstream
     if args.all:
         args.pretrain    = True
         args.downstream  = True
 
     if not any([args.pretrain, args.downstream, args.list, args.verify]):
         parser.print_help()
-        print("\n\033[93mEspecifica al menos una acción: --all, --pretrain, --downstream, --list o --verify\033[0m")
+        print("\n\033[93mSpecify at least one action: --all, --pretrain, --downstream, --list or --verify\033[0m")
         sys.exit(0)
 
     out_dir = Path(args.out)

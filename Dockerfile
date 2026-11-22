@@ -4,7 +4,7 @@
 # Build:
 #   docker build -t lejepa_lp .
 #
-# Tag para submission (nombre debe terminar en _lp.tar.gz):
+# Tag for submission (name must end in _lp.tar.gz):
 #   docker save lejepa_lp | gzip > lejepa_lp.tar.gz
 #
 # Test local:
@@ -16,27 +16,27 @@
 
 FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime
 
-# Evitar prompts interactivos
+# Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Dependencias del sistema
+# System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     libgomp1 \
  && rm -rf /var/lib/apt/lists/*
 
-# Instalar uv para gestión de paquetes
+# Install uv for package management
 RUN pip install --no-cache-dir uv
 
 WORKDIR /workspace
 
-# Copiar el repo y el checkpoint
+# Copy the repo and the checkpoint
 COPY . /workspace/lejepa-ct-3d/
 
-# Instalar dependencias Python (sin torch — ya viene en la imagen base)
-# Solo las necesarias para inferencia (no wandb, hydra, etc.)
+# Install Python dependencies (without torch, already in the base image)
+# Only those needed for inference (no wandb, hydra, etc.)
 RUN pip install --no-cache-dir \
     pytorch-lightning>=2.3.0 \
     monai>=1.3.0 \
@@ -47,17 +47,17 @@ RUN pip install --no-cache-dir \
     h5py>=3.10.0 \
     omegaconf>=2.3.0
 
-# El checkpoint se espera en /workspace/checkpoints/encoder.ckpt
-# Puede montarse como volumen o copiarse aquí:
+# The checkpoint is expected at /workspace/checkpoints/encoder.ckpt
+# It can be mounted as a volume or copied here:
 #   COPY checkpoints/best.ckpt /workspace/checkpoints/encoder.ckpt
-# Para la submission final, descomentar la línea de arriba y comentar la de abajo.
+# For the final submission, uncomment the line above and comment out the one below.
 RUN mkdir -p /workspace/checkpoints
 
-# Variables de entorno por defecto
+# Default environment variables
 ENV PYTHONPATH="/workspace/lejepa-ct-3d:${PYTHONPATH}"
 
-# Script de extracción de features (lo invoca el evaluador)
-# No se puede usar CMD porque el evaluador lo llama con:
+# Feature extraction script (invoked by the evaluator)
+# CMD cannot be used because the evaluator calls it with:
 #   /bin/bash -c "sh extract_feat_LP.sh"
-# Por eso extract_feat_LP.sh debe estar accesible desde /workspace/lejepa-ct-3d/
+# Therefore extract_feat_LP.sh must be reachable from /workspace/lejepa-ct-3d/
 WORKDIR /workspace/lejepa-ct-3d

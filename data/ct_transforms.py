@@ -1,19 +1,19 @@
 """
-Transforms MONAI para CT 3D (FLARE-Task4-CT-FM y CVPR26 downstream).
+MONAI transforms for 3D CT (FLARE-Task4-CT-FM and CVPR26 downstream).
 
-Normalización CT:
-    - HU windowing: clip a [hu_min, hu_max] luego rescale a [0, 1]
-    - Por defecto: [-1000, 1000] HU (cubre aire, grasa, tejidos, hueso)
-    - Multi-windowing (Pillar-0): 4 canales con ventanas especializadas
+CT normalization:
+    - HU windowing: clip to [hu_min, hu_max] then rescale to [0, 1]
+    - Default: [-1000, 1000] HU (covers air, fat, tissue, bone)
+    - Multi-windowing (Pillar-0): 4 channels with specialized windows
       soft tissue [-150,250], lung [-1350,150], bone [-500,1300], mediastinum [-125,225]
-    - Resampling a spacing isotrópico (1.5 mm por defecto)
-    - Orientación canónica RAS
+    - Resampling to isotropic spacing (1.5 mm by default)
+    - Canonical RAS orientation
 
-Diferencias con MRI (mri_transforms.py):
-    - 1 canal (no multichannel como BraTS)
-    - ScaleIntensityRanged en lugar de NormalizeIntensityd (HU tiene escala absoluta)
-    - Spacing más grueso (1.5 mm) para CT de cuerpo completo
-    - Patch size 96³ (volúmenes CT más grandes, memoria limitada)
+Differences from MRI (mri_transforms.py):
+    - 1 channel (not multichannel like BraTS)
+    - ScaleIntensityRanged instead of NormalizeIntensityd (HU has an absolute scale)
+    - Coarser spacing (1.5 mm) for whole-body CT
+    - Patch size 96³ (larger CT volumes, limited memory)
 """
 
 from __future__ import annotations
@@ -50,8 +50,8 @@ from monai.transforms import (
 )
 
 
-# Ventanas HU para multi-windowing (Pillar-0, Table 2)
-# Cada tupla: (hu_min, hu_max)
+# HU windows for multi-windowing (Pillar-0, Table 2)
+# Each tuple: (hu_min, hu_max)
 PILLAR0_WINDOWS = [
     (-150,   250),   # soft tissue
     (-1350,  150),   # lung
@@ -62,13 +62,13 @@ PILLAR0_WINDOWS = [
 
 class LoadNpyd(MapTransform):
     """
-    Carga un volumen pre-procesado desde .npy (int16 HU raw) → tensor float32 4 canales.
+    Loads a preprocessed volume from .npy (int16 HU raw) → float32 4-channel tensor.
 
-    Aplica multi-windowing Pillar-0 en runtime: convierte HU raw a 4 canales
-    normalizados [0,1] con ventanas especializadas (soft tissue, lung, bone, mediastinum).
+    Applies Pillar-0 multi-windowing at runtime: converts raw HU to 4 channels
+    normalized to [0,1] with specialized windows (soft tissue, lung, bone, mediastinum).
 
     Input:  .npy int16 (D, H, W) HU raw
-    Output: tensor float16 (4, D, H, W) normalizado [0,1] por canal
+    Output: tensor float16 (4, D, H, W) normalized to [0,1] per channel
     """
 
     def __call__(self, data: dict) -> dict:
@@ -87,10 +87,10 @@ class LoadNpyd(MapTransform):
 
 class MultiWindowd(MapTransform):
     """
-    Aplica multi-windowing Pillar-0 sobre un tensor HU raw ya cargado.
+    Applies Pillar-0 multi-windowing to an already loaded raw HU tensor.
 
-    Para el pipeline slow/cropfirst: convierte (1, D, H, W) HU raw
-    a (4, D, H, W) float32 multi-ventana.
+    For the slow/cropfirst pipeline: converts (1, D, H, W) HU raw
+    to (4, D, H, W) float32 multi-window.
     """
 
     def __call__(self, data: dict) -> dict:
@@ -110,10 +110,10 @@ class MultiWindowd(MapTransform):
 
 class FastAugd(MapTransform):
     """
-    Augmentaciones espaciales rápidas en PyTorch puro (sin MetaTensor overhead).
+    Fast spatial augmentations in pure PyTorch (no MetaTensor overhead).
 
-    Para el pipeline rápido .npy: ~3ms vs ~20ms con MONAI RandFlipd/Rotate90d.
-    Opera sobre tensores (1, D, H, W) float16 o float32.
+    For the fast .npy pipeline: ~3ms vs ~20ms with MONAI RandFlipd/Rotate90d.
+    Operates on (1, D, H, W) float16 or float32 tensors.
     """
 
     def __init__(self, keys, flip_prob: float = 0.5, rot90_prob: float = 0.3):
@@ -125,14 +125,14 @@ class FastAugd(MapTransform):
         d = dict(data)
         for key in self.keys:
             x = d[key]  # (1, D, H, W)
-            # Random flips sobre los 3 ejes espaciales
+            # Random flips over the 3 spatial axes
             for axis in (1, 2, 3):
                 if torch.rand(1).item() < self.flip_prob:
                     x = x.flip(axis)
-            # Random 90° rotations solo en plano axial in-plane (H-W, dims 2-3).
-            # No rotar en planos que involucran D (dims 1-2 o 1-3): con crops no
-            # cúbicos (D=96 ≠ H=W=160) rot90 intercambiaría D↔H o D↔W y produciría
-            # tensores de distinto shape que no se pueden apilar en el batch.
+            # Random 90° rotations only in the axial in-plane (H-W, dims 2-3).
+            # Do not rotate in planes involving D (dims 1-2 or 1-3): with non-cubic
+            # crops (D=96 ≠ H=W=160) rot90 would swap D↔H or D↔W and produce
+            # tensors of different shapes that cannot be stacked in the batch.
             if torch.rand(1).item() < self.rot90_prob:
                 k = int(torch.randint(1, 4, (1,)).item())
                 x = x.rot90(k, dims=(2, 3))
@@ -208,7 +208,7 @@ class RandNativePatchd(MapTransform):
 
 
 # ---------------------------------------------------------------------------
-# Transforms base CT
+# Base CT transforms
 # ---------------------------------------------------------------------------
 
 def _ct_base_transforms(
@@ -219,10 +219,10 @@ def _ct_base_transforms(
     extra_keys: List[str] = [],
 ) -> List:
     """
-    Pipeline base para cualquier volumen CT:
-      1. Cargar NIfTI
-      2. Orientación RAS canónica
-      3. Resampling al spacing objetivo
+    Base pipeline for any CT volume:
+      1. Load NIfTI
+      2. Canonical RAS orientation
+      3. Resampling to the target spacing
       4. HU windowing → [0, 1]
     """
     all_keys = img_keys + extra_keys
@@ -237,7 +237,7 @@ def _ct_base_transforms(
             pixdim=list(spacing),
             mode=["bilinear"] * len(img_keys) + ["nearest"] * n_extra,
         ),
-        # HU windowing: clip + rescale a [0, 1]
+        # HU windowing: clip + rescale to [0, 1]
         ScaleIntensityRanged(
             keys=img_keys,
             a_min=hu_min,
@@ -250,27 +250,27 @@ def _ct_base_transforms(
 
 
 # ---------------------------------------------------------------------------
-# Augmentaciones estándar
+# Standard augmentations
 # ---------------------------------------------------------------------------
 
 def _spatial_aug_ct(keys: List[str], label_keys: List[str] = []) -> List:
-    """Augmentaciones espaciales para CT: flips + rotaciones 90° + zoom."""
+    """Spatial augmentations for CT: flips + 90° rotations + zoom."""
     return [
         RandFlipd(keys=keys, prob=0.5, spatial_axis=0),
         RandFlipd(keys=keys, prob=0.5, spatial_axis=1),
         RandFlipd(keys=keys, prob=0.5, spatial_axis=2),
-        # Rotaciones 90°: gratuitas (permutación de ejes, sin interpolación)
-        # Fuerzan invarianza a orientación — CT de distintos centros varían
+        # 90° rotations: free (axis permutation, no interpolation)
+        # They force orientation invariance; CT from different centers varies
         RandRotate90d(keys=keys, prob=0.3, spatial_axes=(0, 1)),
         RandRotate90d(keys=keys, prob=0.2, spatial_axes=(0, 2)),
-        # Zoom conservador con keep_size=True para mantener 96³ fijo
-        # (sin esto, el output size varía y el ViT3D grid 6×6×6 falla)
+        # Conservative zoom with keep_size=True to keep 96³ fixed
+        # (without this, the output size varies and the ViT3D 6×6×6 grid fails)
         RandZoomd(keys=keys, min_zoom=0.85, max_zoom=1.15, prob=0.3, keep_size=True),
     ]
 
 
 def _intensity_aug_ct(img_keys: List[str]) -> List:
-    """Augmentaciones de intensidad ligeras para CT (rango HU ya fijo)."""
+    """Light intensity augmentations for CT (HU range already fixed)."""
     return [
         RandScaleIntensityd(keys=img_keys, factors=0.1, prob=0.3),
         RandShiftIntensityd(keys=img_keys, offsets=0.1, prob=0.3),
@@ -286,7 +286,7 @@ def _intensity_aug_ct(img_keys: List[str]) -> List:
 
 
 # ---------------------------------------------------------------------------
-# Pipelines por modo
+# Pipelines per mode
 # ---------------------------------------------------------------------------
 
 def _ct_pretrain_transforms(
@@ -295,7 +295,7 @@ def _ct_pretrain_transforms(
     hu_min: float,
     hu_max: float,
 ) -> Compose:
-    """SSL pretrain: imagen sola, crop aleatorio, augmentaciones."""
+    """SSL pretrain: image only, random crop, augmentations."""
     img_key = ["image"]
     base    = _ct_base_transforms(img_key, spacing, hu_min, hu_max)
 
@@ -317,10 +317,10 @@ def _ct_classify_transforms(
     hu_max: float,
 ) -> Compose:
     """
-    Clasificación (linear probe / fine-tune): imagen completa sin crop,
-    ya que necesitamos representación global del volumen.
+    Classification (linear probe / fine-tune): full image without crop,
+    since we need a global representation of the volume.
 
-    El encoder extrae features del volumen completo → pool global → lineal.
+    The encoder extracts features from the full volume → global pool → linear.
     """
     img_key = ["image"]
     base    = _ct_base_transforms(img_key, spacing, hu_min, hu_max)
@@ -341,7 +341,7 @@ def _ct_val_transforms(
     hu_min: float,
     hu_max: float,
 ) -> Compose:
-    """Validación/test: sin augmentaciones, crop central determinista."""
+    """Validation/test: no augmentations, deterministic center crop."""
     img_key = ["image"]
     base    = _ct_base_transforms(img_key, spacing, hu_min, hu_max)
 
@@ -355,34 +355,34 @@ def _ct_val_transforms(
 
 
 # ---------------------------------------------------------------------------
-# Pipelines rápidos (para .npy pre-procesados: sin Load/Orient/Resample)
+# Fast pipelines (for preprocessed .npy: no Load/Orient/Resample)
 # ---------------------------------------------------------------------------
 
 def _ct_pretrain_fast(patch_size: Tuple[int, int, int]) -> Compose:
     """
-    Pipeline rápido para .npy pre-procesados (int16 HU raw).
+    Fast pipeline for preprocessed .npy (int16 HU raw).
 
-    LoadNpyd aplica multi-windowing Pillar-0 en runtime: int16 HU raw
+    LoadNpyd applies Pillar-0 multi-windowing at runtime: int16 HU raw
     → 4 canales float16 [0,1] (soft tissue, lung, bone, mediastinum).
 
-    Usa FastAugd (PyTorch puro) en vez de MONAI para las augmentaciones
-    espaciales: evita overhead MetaTensor (~20ms → ~3ms).
+    Uses FastAugd (pure PyTorch) instead of MONAI for the spatial
+    augmentations: avoids MetaTensor overhead (~20ms → ~3ms).
 
-    Speedup vs pipeline original: ~900ms → ~35ms por sample.
+    Speedup vs original pipeline: ~900ms → ~35ms per sample.
     """
     img_key = ["image"]
     return Compose([
         LoadNpyd(keys=img_key),                                         # int16 HU raw → (4,D,H,W) float16
-        SpatialPadd(keys=img_key, spatial_size=patch_size),             # pad si vol < patch_size
+        SpatialPadd(keys=img_key, spatial_size=patch_size),             # pad if vol < patch_size
         RandSpatialCropd(keys=img_key, roi_size=patch_size, random_size=False),
-        FastAugd(keys=img_key, flip_prob=0.5, rot90_prob=0.3),         # flips + rot90 rápidos
+        FastAugd(keys=img_key, flip_prob=0.5, rot90_prob=0.3),         # fast flips + rot90
         *_intensity_aug_ct(img_key),                                    # MONAI intensity augs
         EnsureTyped(keys=img_key, dtype="float32"),                     # float16 → float32
     ])
 
 
 def _ct_val_fast(patch_size: Tuple[int, int, int]) -> Compose:
-    """Pipeline rápido de validación para .npy (int16 HU raw → 4 canales)."""
+    """Fast validation pipeline for .npy (int16 HU raw → 4 channels)."""
     img_key = ["image"]
     return Compose([
         LoadNpyd(keys=img_key),
@@ -442,7 +442,7 @@ def _ct_val_cropfirst(
     hu_min: float,
     hu_max: float,
 ) -> Compose:
-    """Validación con Option-A (determinista: crop central en espacio nativo)."""
+    """Validation with Option-A (deterministic: center crop in native space)."""
     img_key = ["image"]
     target_mm = tuple(patch_size[i] * spacing[i] * 1.06 for i in range(3))
 
@@ -464,7 +464,7 @@ def _ct_val_cropfirst(
 
 
 # ---------------------------------------------------------------------------
-# API pública
+# Public API
 # ---------------------------------------------------------------------------
 
 def build_ct_transforms(
@@ -477,17 +477,17 @@ def build_ct_transforms(
     cropfirst: bool = False,
 ) -> Compose:
     """
-    Devuelve el pipeline de transforms correcto para CT.
+    Returns the right transforms pipeline for CT.
 
     Args:
         mode:       "pretrain" | "classify" | "val"
-        patch_size: Tamaño del parche 3D (D, H, W).
-        spacing:    Spacing objetivo en mm.
-        hu_min:     Límite inferior de la ventana HU.
-        hu_max:     Límite superior de la ventana HU.
-        fast:       Si True, usa pipeline .npy (requiere preprocess_ct.py). ~20ms/sample.
-        cropfirst:  Si True, usa Option-A: crop nativo → resample parche. ~110ms/sample.
-                    No requiere preprocesado offline. Auto-detectado en FlareCTDataset.
+        patch_size: 3D patch size (D, H, W).
+        spacing:    Target spacing in mm.
+        hu_min:     Lower bound of the HU window.
+        hu_max:     Upper bound of the HU window.
+        fast:       If True, uses the .npy pipeline (requires preprocess_crops.py). ~20ms/sample.
+        cropfirst:  If True, uses Option-A: native crop → resample patch. ~110ms/sample.
+                    Needs no offline preprocessing. Auto-detected in FlareCTDataset.
     """
     if fast:
         return _ct_pretrain_fast(patch_size) if mode == "pretrain" else _ct_val_fast(patch_size)
@@ -505,4 +505,4 @@ def build_ct_transforms(
     elif mode == "val":
         return _ct_val_transforms(patch_size, spacing, hu_min, hu_max)
     else:
-        raise ValueError(f"Modo desconocido: '{mode}'. Usa 'pretrain', 'classify' o 'val'.")
+        raise ValueError(f"Unknown mode: '{mode}'. Use 'pretrain', 'classify' or 'val'.")

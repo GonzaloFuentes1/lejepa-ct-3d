@@ -1,11 +1,11 @@
 """
-CT Dataset: FLARE-Task4-CT-FM (pretrain) y CVPR26-3DCTFMCompetition (downstream).
+CT Dataset: FLARE-Task4-CT-FM (pretrain) and CVPR26-3DCTFMCompetition (downstream).
 
-Modos:
-    pretrain    : Solo imagen, para SSL. Usa flare_ct_coreset.yaml.
-    linear_probe: Imagen + etiqueta binaria por tarea. Usa cvpr26_downstream.yaml.
+Modes:
+    pretrain    : Image only, for SSL. Uses flare_ct_coreset.yaml.
+    linear_probe: Image + binary label per task. Uses cvpr26_downstream.yaml.
 
-Layouts esperados:
+Expected layouts:
 
 FLARE-CT pretrain (coreset):
     data_dir/
@@ -15,7 +15,7 @@ FLARE-CT pretrain (coreset):
 
 CVPR26 downstream:
     data_dir/
-        <dataset_name>-clf-tr-val/     (ej. AMOS-clf-tr-val)
+        <dataset_name>-clf-tr-val/     (e.g. AMOS-clf-tr-val)
             imagesTr/
                 <case_id>.nii.gz
             imagesVal/
@@ -23,7 +23,7 @@ CVPR26 downstream:
             labels/
                 <task_name>_train.csv  (columns: case_id, label)
                 <task_name>_val.csv
-        fg_masks/                      (ROI masks para tareas con región específica)
+        fg_masks/                      (ROI masks for tasks with a specific region)
             <task_name>/
                 <case_id>.nii.gz
 """
@@ -49,20 +49,20 @@ from data.ct_transforms import build_ct_transforms
 
 class FlareCTDataset(TorchDataset):
     """
-    Dataset de preentrenamiento SSL sobre FLARE-Task4-CT-FM (coreset o full).
+    SSL pretraining dataset over FLARE-Task4-CT-FM (coreset or full).
 
-    Descubre todos los volúmenes .nii.gz bajo data_dir.
-    Si se provee coreset_manifest, filtra solo los archivos del coreset.
+    Discovers all .nii.gz volumes under data_dir.
+    If coreset_manifest is provided, keeps only the coreset files.
 
     Args:
-        data_dir:          Ruta a la carpeta con volúmenes (coreset o full).
-        split:             "train" o "val".
-        patch_size:        Tamaño del parche 3D.
-        spacing:           Spacing en mm para resampling.
-        hu_min, hu_max:    Ventana HU para normalización.
-        val_split:         Fracción para validación.
-        cache_num:         Items a cachear en RAM (0 = sin caché).
-        coreset_manifest:  Ruta al JSON del coreset (opcional, filtra archivos).
+        data_dir:          Path to the folder with volumes (coreset or full).
+        split:             "train" or "val".
+        patch_size:        3D patch size.
+        spacing:           Spacing in mm for resampling.
+        hu_min, hu_max:    HU window for normalization.
+        val_split:         Validation fraction.
+        cache_num:         Items to cache in RAM (0 = no cache).
+        coreset_manifest:  Path to the coreset JSON (optional, filters files).
     """
 
     def __init__(
@@ -83,9 +83,9 @@ class FlareCTDataset(TorchDataset):
         super().__init__()
         self.data_dir = Path(data_dir)
 
-        # --- Auto-detectar modo de carga ---
-        # 1. fast (.npy): requiere preprocess_ct.py offline, ~20ms/sample
-        # 2. cropfirst (Option-A): sin preprocesado, ~110ms/sample  ← default si no hay .npy
+        # --- Auto-detect loading mode ---
+        # 1. fast (.npy): requires offline preprocess_crops.py, ~20ms/sample
+        # 2. cropfirst (Option-A): no preprocessing, ~110ms/sample  ← default if there is no .npy
         # 3. slow (.nii.gz full resample): ~900ms/sample
         if npy_dir is not None:
             npy_root = Path(npy_dir)
@@ -96,14 +96,14 @@ class FlareCTDataset(TorchDataset):
         use_cropfirst = cropfirst and not use_fast
 
         if use_fast:
-            print(f"[FlareCTDataset] Modo fast (.npy): {npy_root}")
+            print(f"[FlareCTDataset] Fast mode (.npy): {npy_root}")
         elif use_cropfirst:
-            print(f"[FlareCTDataset] Modo cropfirst (Option-A, ~110ms/sample)")
+            print(f"[FlareCTDataset] Cropfirst mode (Option-A, ~110ms/sample)")
         else:
-            print(f"[FlareCTDataset] Modo lento (full Spacingd, ~900ms/sample)")
+            print(f"[FlareCTDataset] Slow mode (full Spacingd, ~900ms/sample)")
 
-        # Descubrir archivos — opcionalmente limitando a subdirectorios específicos
-        # (ej. train_subdirs: [train_part1, train_part2] excluye val_downstream)
+        # Discover files, optionally restricting to specific subdirectories
+        # (e.g. train_subdirs: [train_part1, train_part2] excludes val_downstream)
         def _scan_dir(root: Path, pattern: str) -> List[Path]:
             if train_subdirs:
                 paths = []
@@ -112,7 +112,7 @@ class FlareCTDataset(TorchDataset):
                     if subdir.exists():
                         paths.extend(subdir.rglob(pattern))
                     else:
-                        print(f"[FlareCTDataset] WARN: subdir no encontrado: {subdir}")
+                        print(f"[FlareCTDataset] WARN: subdir not found: {subdir}")
                 return sorted(p for p in paths if not p.name.startswith("._"))
             return sorted(p for p in root.rglob(pattern) if not p.name.startswith("._"))
 
@@ -121,7 +121,7 @@ class FlareCTDataset(TorchDataset):
         else:
             all_vols = _scan_dir(self.data_dir, "*.nii.gz")
 
-        # Filtrar por manifiesto de coreset si se provee
+        # Filter by coreset manifest if provided
         if coreset_manifest:
             manifest_path = Path(coreset_manifest)
             if manifest_path.exists():
@@ -136,15 +136,15 @@ class FlareCTDataset(TorchDataset):
 
         if len(all_vols) == 0:
             raise FileNotFoundError(
-                f"No se encontraron archivos {'npy' if use_fast else 'nii.gz'} bajo "
+                f"No {'npy' if use_fast else 'nii.gz'} files found under "
                 f"{'npy_dir' if use_fast else 'data_dir'}. "
-                "Revisa data_dir en configs/data/*.yaml o ejecuta scripts/preprocess_ct.py"
+                "Check data_dir in configs/data/*.yaml or run scripts/preprocess_crops.py"
             )
 
-        print(f"[FlareCTDataset] {len(all_vols)} volúmenes, split={split}")
+        print(f"[FlareCTDataset] {len(all_vols)} volumes, split={split}")
         data_dicts = [{"image": str(v)} for v in all_vols]
 
-        # Shuffle determinista antes del split para garantizar diversidad de fuentes en val
+        # Deterministic shuffle before the split to guarantee source diversity in val
         rng = random.Random(42)
         rng.shuffle(data_dicts)
 
@@ -184,12 +184,12 @@ class FlareCTDataset(TorchDataset):
 
 class CVPR26DownstreamDataset(TorchDataset):
     """
-    Dataset de clasificación binaria para las 17 tareas del CVPR26 challenge.
+    Binary classification dataset for the 17 CVPR26 challenge tasks.
 
-    Carga un volumen CT + etiqueta binaria (0/1) para una tarea específica.
-    Compatible con linear probing (features extraídas del encoder congelado).
+    Loads a CT volume + binary label (0/1) for a specific task.
+    Compatible with linear probing (features extracted from the frozen encoder).
 
-    Estructura del directorio esperada:
+    Expected directory structure:
         data_dir/
             <DatasetName>-clf-tr-val/
                 imagesTr/   *.nii.gz
@@ -199,20 +199,20 @@ class CVPR26DownstreamDataset(TorchDataset):
                     <task>_val.csv
 
     Args:
-        data_dir:    Raíz del downstream dataset.
-        task:        Nombre de la tarea (ej. "kidney_stone").
-        split:       "train" o "val".
-        patch_size:  Tamaño del parche 3D.
-        spacing:     Spacing en mm.
-        hu_min, hu_max: Ventana HU.
-        roi_masks_dir: Carpeta fg_masks/<task>/ con máscaras ROI opcionales.
-        cache_num:   Items a cachear en RAM.
+        data_dir:    Root of the downstream dataset.
+        task:        Task name (e.g. "kidney_stone").
+        split:       "train" or "val".
+        patch_size:  3D patch size.
+        spacing:     Spacing in mm.
+        hu_min, hu_max: HU window.
+        roi_masks_dir: fg_masks/<task>/ folder with optional ROI masks.
+        cache_num:   Items to cache in RAM.
     """
 
-    # 15 tareas reales de CVPR 2026 — todas de AMOS abdominal CT
-    # Fuente: https://github.com/kmin940/CVPR26-3DCTFMCompetition
+    # 15 real CVPR 2026 tasks, all from AMOS abdominal CT
+    # Source: https://github.com/kmin940/CVPR26-3DCTFMCompetition
     TASK_TO_DATASET: Dict[str, str] = {
-        # ROI tasks (11) — con máscaras de órgano via TotalSegmentator
+        # ROI tasks (11) — with organ masks via TotalSegmentator
         "splenomegaly":         "AMOS-clf-tr-val",
         "adrenal_hyperplasia":  "AMOS-clf-tr-val",
         "fatty_liver":          "AMOS-clf-tr-val",
@@ -224,7 +224,7 @@ class CVPR26DownstreamDataset(TorchDataset):
         "kidney_stone":         "AMOS-clf-tr-val",
         "liver_cyst":           "AMOS-clf-tr-val",
         "renal_cyst":           "AMOS-clf-tr-val",
-        # Non-ROI tasks (4) — clasificación global del volumen
+        # Non-ROI tasks (4) — global volume classification
         "atherosclerosis":      "AMOS-clf-tr-val",
         "colorectal_cancer":    "AMOS-clf-tr-val",
         "ascites":              "AMOS-clf-tr-val",
@@ -263,24 +263,24 @@ class CVPR26DownstreamDataset(TorchDataset):
 
         if task not in self.TASK_TO_DATASET:
             raise ValueError(
-                f"Tarea desconocida: '{task}'. "
-                f"Opciones: {sorted(self.TASK_TO_DATASET.keys())}"
+                f"Unknown task: '{task}'. "
+                f"Options: {sorted(self.TASK_TO_DATASET.keys())}"
             )
 
         dataset_name = self.TASK_TO_DATASET[task]
         dataset_dir  = self.data_dir / dataset_name
 
-        # Directorio de imágenes según split
+        # Image directory according to split
         img_subdir = "imagesTr" if split == "train" else "imagesVal"
         img_dir    = dataset_dir / img_subdir
 
-        # Cargar etiquetas desde CSV
+        # Load labels from CSV
         label_suffix = "train" if split == "train" else "val"
         label_csv = dataset_dir / "labels" / f"{task}_{label_suffix}.csv"
 
         labels_map = self._load_labels(label_csv)
 
-        # Construir data_dicts
+        # Build data_dicts
         data_dicts = self._build_data_dicts(
             img_dir=img_dir,
             labels_map=labels_map,
@@ -303,20 +303,20 @@ class CVPR26DownstreamDataset(TorchDataset):
 
     @staticmethod
     def _load_labels(csv_path: Path) -> Dict[str, int]:
-        """Carga {case_id: label} desde CSV. Soporta columnas case_id/label o id/label."""
+        """Loads {case_id: label} from a CSV. Supports case_id/label or id/label columns."""
         if not csv_path.exists():
             raise FileNotFoundError(
-                f"Archivo de etiquetas no encontrado: {csv_path}\n"
-                "Descarga el downstream con: python scripts/download_ct_datasets.py --downstream"
+                f"Labels file not found: {csv_path}\n"
+                "Download the downstream data with: python scripts/download_ct_datasets.py --downstream"
             )
         labels: Dict[str, int] = {}
         with open(csv_path, newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Acepta múltiples nombres de columna
+                # Accept multiple column names
                 case_id = row.get("case_id") or row.get("id") or row.get("filename", "")
                 label   = row.get("label") or row.get("class") or "0"
-                # Normalizar case_id: quitar extensión si viene con ella
+                # Normalize case_id: strip the extension if present
                 case_id = Path(case_id).stem.replace(".nii", "")
                 labels[case_id] = int(label)
         return labels
@@ -329,7 +329,7 @@ class CVPR26DownstreamDataset(TorchDataset):
     ) -> List[Dict]:
         data_dicts: List[Dict] = []
         if not img_dir.exists():
-            raise FileNotFoundError(f"Directorio de imágenes no encontrado: {img_dir}")
+            raise FileNotFoundError(f"Image directory not found: {img_dir}")
 
         for img_path in sorted(img_dir.glob("*.nii.gz")):
             if img_path.name.startswith("._"):
@@ -344,7 +344,7 @@ class CVPR26DownstreamDataset(TorchDataset):
                 "case_id": case_id,
             }
 
-            # Máscara ROI si está disponible
+            # ROI mask if available
             if roi_masks_dir and roi_masks_dir.exists():
                 roi_path = roi_masks_dir / img_path.name
                 if roi_path.exists():
@@ -362,7 +362,7 @@ class CVPR26DownstreamDataset(TorchDataset):
 
 
 # ---------------------------------------------------------------------------
-# Factory de conveniencia
+# Convenience factory
 # ---------------------------------------------------------------------------
 
 def build_ct_dataset(
@@ -370,9 +370,9 @@ def build_ct_dataset(
     split: str = "train",
 ) -> TorchDataset:
     """
-    Construye el dataset correcto a partir de la config Hydra.
+    Builds the right dataset from the Hydra config.
 
-    cfg.dataset puede ser:
+    cfg.dataset can be:
         "flare_ct"          → FlareCTDataset (pretrain SSL)
         "cvpr26_downstream" → CVPR26DownstreamDataset (linear probe)
     """
@@ -400,7 +400,7 @@ def build_ct_dataset(
     elif cfg.dataset == "cvpr26_downstream":
         task = getattr(cfg, "task", None)
         if task is None:
-            raise ValueError("Especifica cfg.task para cvpr26_downstream.")
+            raise ValueError("Specify cfg.task for cvpr26_downstream.")
         return CVPR26DownstreamDataset(
             data_dir=cfg.data_dir,
             task=task,
@@ -414,6 +414,6 @@ def build_ct_dataset(
         )
     else:
         raise ValueError(
-            f"Dataset CT desconocido: '{cfg.dataset}'. "
-            "Usa 'flare_ct' o 'cvpr26_downstream'."
+            f"Unknown CT dataset: '{cfg.dataset}'. "
+            "Use 'flare_ct' or 'cvpr26_downstream'."
         )

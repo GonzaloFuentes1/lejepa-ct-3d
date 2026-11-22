@@ -1,17 +1,17 @@
 #!/bin/bash
 # extract_feat_LP.sh — Feature extraction script for Task 1 (Linear Probing)
 #
-# Este script se ejecuta DENTRO del Docker container.
-# La competición lo invoca así:
+# This script runs INSIDE the Docker container.
+# The competition invokes it like this:
 #   docker container run --gpus "device=0" -m 32G --name <team>_lp --rm \
 #     [-e MASKS_DIR=/workspace/inputs/fg_masks/<disease>] \
 #     -v $PWD/inputs/:/workspace/inputs/ \
 #     -v $PWD/outputs/:/workspace/outputs/ \
 #     <team>_lp:latest /bin/bash -c "sh extract_feat_LP.sh"
 #
-# Variables de entorno:
-#   MASKS_DIR  (opcional) — path a las máscaras ROI dentro del container
-#                           p.ej. /workspace/inputs/fg_masks/splenomegaly
+# Environment variables:
+#   MASKS_DIR  (optional) — path to the ROI masks inside the container
+#                           e.g. /workspace/inputs/fg_masks/splenomegaly
 
 set -e
 
@@ -20,10 +20,10 @@ OUTPUT_DIR="/workspace/outputs"
 CKPT="/workspace/checkpoints/encoder.ckpt"
 REPO_DIR="/workspace/lejepa-ct-3d"
 
-# Construir flags opcionales
+# Build optional flags
 EXTRA_FLAGS=""
 if [ -n "${MASKS_DIR}" ]; then
-    echo "ROI mode: usando máscaras en ${MASKS_DIR}"
+    echo "ROI mode: using masks in ${MASKS_DIR}"
     EXTRA_FLAGS="--masks_dir ${MASKS_DIR}"
 fi
 
@@ -43,4 +43,4 @@ python scripts/extract_features.py \
     --fp16 \
     ${EXTRA_FLAGS}
 
-echo "Extracción completada."
+echo "Extraction completed."

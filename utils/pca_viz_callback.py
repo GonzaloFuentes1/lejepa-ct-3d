@@ -1,17 +1,17 @@
 """
-PCA Feature Visualization Callback para W&B.
+PCA Feature Visualization Callback for W&B.
 
-Cada `every_n_steps` pasos:
-  1. Toma un batch fijo del val_loader (siempre el mismo volumen → evolución comparables)
-  2. Extrae todos los tokens del encoder (B=1, N=600, D=1024)
-  3. PCA a 3 componentes → RGB normalizado [0,1]
-  4. Reshape a grid espacial (Gd, Gh, Gw) y visualiza las 3 vistas ortogonales:
-       Axial   (z=medio): slice en plano H×W
-       Coronal (y=medio): slice en plano D×W
-       Sagital (x=medio): slice en plano D×H
-  5. Loguea a W&B como imagen con el volumen CT de fondo en escala de grises
+Every `every_n_steps` steps:
+  1. Takes a fixed batch from val_loader (always the same volume → comparable evolution)
+  2. Extracts all encoder tokens (B=1, N=600, D=1024)
+  3. PCA to 3 components → normalized RGB [0,1]
+  4. Reshapes to the spatial grid (Gd, Gh, Gw) and visualizes the 3 orthogonal views:
+       Axial   (z=middle): slice in the H×W plane
+       Coronal (y=middle): slice in the D×W plane
+       Sagittal (x=middle): slice in the D×H plane
+  5. Logs to W&B as an image with the CT volume as a grayscale background
 
-Inspirado en Figure 1 del paper LeJEPA (Balestriero & LeCun, 2025).
+Inspired by Figure 1 of the LeJEPA paper (Balestriero & LeCun, 2025).
 """
 
 from __future__ import annotations
@@ -27,14 +27,14 @@ from pytorch_lightning.callbacks import Callback
 
 class PCAVizCallback(Callback):
     """
-    Callback que loguea visualizaciones PCA de los embeddings del encoder a W&B.
+    Callback that logs PCA visualizations of the encoder embeddings to W&B.
 
     Args:
-        val_loader:     DataLoader de validación (se fija el primer batch).
-        every_n_steps:  Frecuencia de logging en pasos de entrenamiento.
-        patch_size:     Patch size del encoder (default 16).
-        n_components:   Componentes PCA (3 → RGB).
-        max_vols:       Cuántos volúmenes del batch visualizar (default 1).
+        val_loader:     Validation DataLoader (the first batch is fixed).
+        every_n_steps:  Logging frequency in training steps.
+        patch_size:     Encoder patch size (default 16).
+        n_components:   PCA components (3 → RGB).
+        max_vols:       How many volumes of the batch to visualize (default 1).
     """
 
     def __init__(
@@ -59,14 +59,14 @@ class PCAVizCallback(Callback):
     # ------------------------------------------------------------------
 
     def _get_batch(self, step: int, device: torch.device) -> torch.Tensor:
-        """Devuelve un volumen del pool rotatorio (distinto en cada trigger)."""
+        """Returns a volume from the rotating pool (different at each trigger)."""
         if self._val_iter is None:
             self._val_iter = iter(self._val_loader)
 
-        # Índice que rota entre los pool_size slots
+        # Index that rotates across the pool_size slots
         slot = (step // self.every_n_steps) % self._pool_size
 
-        # Rellenar el pool hasta el slot necesario
+        # Fill the pool up to the needed slot
         while len(self._batch_pool) <= slot:
             try:
                 batch = next(self._val_iter)
@@ -84,12 +84,12 @@ class PCAVizCallback(Callback):
     def _pca_rgb(self, tokens: torch.Tensor) -> np.ndarray:
         """
         tokens: (N, D) float32
-        Retorna: (N, 3) float32 en [0,1] con los primeros 3 componentes PCA normalizados.
+        Returns: (N, 3) float32 in [0,1] with the first 3 PCA components normalized.
         """
         z = tokens.float()
         z = z - z.mean(0)
 
-        # SVD para PCA (más estable que eig en bf16)
+        # SVD for PCA (more stable than eig in bf16)
         try:
             _, _, Vh = torch.linalg.svd(z, full_matrices=False)
             components = Vh[: self.n_components]        # (3, D)
@@ -97,7 +97,7 @@ class PCAVizCallback(Callback):
         except Exception:
             proj = z[:, : self.n_components]
 
-        # Normalizar cada componente a [0, 1]
+        # Normalize each component to [0, 1]
         proj = proj - proj.min(0).values
         denom = proj.max(0).values - proj.min(0).values + 1e-8
         proj = proj / denom
@@ -108,15 +108,15 @@ class PCAVizCallback(Callback):
     @torch.no_grad()
     def _make_panel(
         self,
-        vol: torch.Tensor,      # (1, D, H, W) float32 normalizado [0,1]
+        vol: torch.Tensor,      # (1, D, H, W) float32 normalized [0,1]
         tokens: torch.Tensor,   # (N, embed_dim)
         grid: tuple,            # (Gd, Gh, Gw)
     ) -> np.ndarray:
         """
-        Construye un panel con 3 vistas ortogonales:
-          fila 1: CT en escala de grises
-          fila 2: PCA features (coloreadas)
-        Retorna: (H_panel, W_panel, 3) uint8
+        Builds a panel with 3 orthogonal views:
+          row 1: CT in grayscale
+          row 2: PCA features (colored)
+        Returns: (H_panel, W_panel, 3) uint8
         """
         Gd, Gh, Gw = grid
         pca_rgb = self._pca_rgb(tokens)          # (N, 3)
@@ -125,14 +125,14 @@ class PCAVizCallback(Callback):
         P = self.patch_size
         D, H, W = vol.shape[1], vol.shape[2], vol.shape[3]
 
-        # Upsample PCA grid a resolución completa del volumen
+        # Upsample the PCA grid to the full volume resolution
         pca_t = torch.from_numpy(pca_vol).permute(3, 0, 1, 2).unsqueeze(0)  # (1,3,Gd,Gh,Gw)
         pca_full = F.interpolate(pca_t, size=(D, H, W), mode="trilinear", align_corners=False)  # (1,3,D,H,W)
         pca_np = pca_full.squeeze(0).permute(1, 2, 3, 0).numpy()             # (D,H,W,3)
 
-        ct_np = vol.squeeze(0).numpy()  # (D,H,W) en [0,1]
+        ct_np = vol.squeeze(0).numpy()  # (D,H,W) in [0,1]
 
-        # Slices medios en cada plano
+        # Middle slices in each plane
         zd = D // 2
         zh = H // 2
         zw = W // 2
@@ -154,7 +154,7 @@ class PCAVizCallback(Callback):
         coronal_pca = to_uint8(pca_np[:, zh, :])  # (D, W, 3)
         sagital_pca = to_uint8(pca_np[:, :, zw])  # (D, H, 3)
 
-        # Igualar alturas para concatenar horizontalmente
+        # Equalize heights to concatenate horizontally
         def pad_h(img: np.ndarray, target_h: int) -> np.ndarray:
             if img.shape[0] < target_h:
                 pad = np.zeros((target_h - img.shape[0], img.shape[1], 3), dtype=img.dtype)
@@ -169,13 +169,13 @@ class PCAVizCallback(Callback):
         coronal_pca = pad_h(coronal_pca, target_h)
         sagital_pca = pad_h(sagital_pca, target_h)
 
-        # Separador vertical de 2px
+        # 2px vertical separator
         sep = np.ones((target_h, 2, 3), dtype=np.uint8) * 128
 
         row_ct  = np.concatenate([axial_ct,  sep, coronal_ct,  sep, sagital_ct],  axis=1)
         row_pca = np.concatenate([axial_pca, sep, coronal_pca, sep, sagital_pca], axis=1)
 
-        # Separador horizontal
+        # Horizontal separator
         sep_h = np.ones((4, row_ct.shape[1], 3), dtype=np.uint8) * 128
         panel = np.concatenate([row_ct, sep_h, row_pca], axis=0)
 
@@ -190,7 +190,7 @@ class PCAVizCallback(Callback):
         if trainer.logger is None:
             return
 
-        # Solo loguear desde rank 0
+        # Only log from rank 0
         if trainer.global_rank != 0:
             return
 

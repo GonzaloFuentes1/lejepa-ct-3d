@@ -1,11 +1,11 @@
 """
 SSL pretraining entry point — CVPR 2026 CT Foundation Model.
 
-Uso:
-    # LeJEPA + SIGReg en FLARE-CT coreset (default)
+Usage:
+    # LeJEPA + SIGReg on the FLARE-CT coreset (default)
     python scripts/pretrain.py
 
-    # Classic I-JEPA con EMA
+    # Classic I-JEPA with EMA
     python scripts/pretrain.py encoder=jepa_ema
 
     # LeJEPA + Flow Matching local
@@ -14,10 +14,10 @@ Uso:
     # LeJEPA + Flow Matching global
     python scripts/pretrain.py encoder=lejepa_diff_global
 
-    # Override número de GPUs
+    # Override the number of GPUs
     python scripts/pretrain.py trainer.devices=2
 
-    # Reanudar desde checkpoint
+    # Resume from checkpoint
     python scripts/pretrain.py resume=checkpoints/last.ckpt
 """
 
@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import warnings
 
-# Suprimir warnings de librerías que no podemos cambiar
+# Suppress warnings from libraries we cannot change
 warnings.filterwarnings("ignore", message=".*cuda.cudart.*deprecated.*", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*LeafSpec.*")
 warnings.filterwarnings("ignore", message=".*treespec.*")
@@ -42,10 +42,10 @@ warnings.filterwarnings("ignore", message=".*warn_deprecated.*", category=Future
 
 import torch
 
-torch.set_float32_matmul_precision("high")   # TF32 matmul en H100/A100
-torch.backends.cuda.matmul.allow_tf32 = True  # ~1.5× speedup en matmul
-torch.backends.cudnn.allow_tf32 = True        # ~1.2× speedup en conv
-torch.backends.cudnn.benchmark = True         # autotuner de kernels para shapes fijas
+torch.set_float32_matmul_precision("high")   # TF32 matmul on H100/A100
+torch.backends.cuda.matmul.allow_tf32 = True  # ~1.5× speedup in matmul
+torch.backends.cudnn.allow_tf32 = True        # ~1.2× speedup in conv
+torch.backends.cudnn.benchmark = True         # kernel autotuner for fixed shapes
 
 try:
     from dotenv import load_dotenv
@@ -94,7 +94,7 @@ def main(cfg: DictConfig) -> None:
         val_ds,
         batch_size=cfg.data.batch_size_per_gpu,
         shuffle=False,
-        num_workers=min(num_workers, 4),          # val no necesita tantos workers
+        num_workers=min(num_workers, 4),          # val does not need as many workers
         prefetch_factor=2 if num_workers > 0 else None,
         pin_memory=True,
         persistent_workers=num_workers > 0,
@@ -102,9 +102,9 @@ def main(cfg: DictConfig) -> None:
 
     module = LeJEPAModule(cfg)
 
-    # torch.compile con reduce-overhead: activa CUDAGraphs → GPU al 100%
-    # Requiere shapes fijas en el encoder — garantizado por las dos llamadas separadas
-    # en _step_lejepa (ctx_ids y tgt_ids tienen longitud constante por budgets fijos)
+    # torch.compile with reduce-overhead: enables CUDAGraphs → 100% GPU utilization
+    # Requires fixed shapes in the encoder, guaranteed by the two separate calls
+    # in _step_lejepa (ctx_ids and tgt_ids have constant length due to fixed budgets)
     if cfg.get("compile", True):
         module.encoder = torch.compile(module.encoder, mode="reduce-overhead")
         if module.predictor is not None:
@@ -122,13 +122,13 @@ def main(cfg: DictConfig) -> None:
             save_last=True,
         ),
         LearningRateMonitor(logging_interval="step"),
-        TQDMProgressBar(refresh_rate=10),   # actualiza cada 10 batches
+        TQDMProgressBar(refresh_rate=10),   # update every 10 batches
         PCAVizCallback(
             val_loader=val_loader,
             every_n_steps=pca_every,
             patch_size=cfg.encoder.patch_size,
         ),
-        # LPEvalCallback desactivado temporalmente (GPU desync)
+        # LPEvalCallback temporarily disabled (GPU desync)
         # LPEvalCallback(
         #     data_dir=cfg.get(
         #         "lp_data_dir",
@@ -166,7 +166,7 @@ def main(cfg: DictConfig) -> None:
         val_check_interval=cfg.trainer.val_check_interval,
         limit_train_batches=cfg.trainer.get("limit_train_batches", 1.0),
         limit_val_batches=cfg.trainer.get("limit_val_batches", 1.0),
-        check_val_every_n_epoch=None,   # usar steps globales, no epochs
+        check_val_every_n_epoch=None,   # use global steps, not epochs
         callbacks=callbacks,
         logger=logger,
         enable_progress_bar=True,

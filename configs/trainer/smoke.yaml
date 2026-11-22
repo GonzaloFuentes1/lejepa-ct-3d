@@ -1,6 +1,6 @@
-# Smoke test — carga real de producción, duración corta
-# 4 GPUs, batch=32/GPU, workers completos, compile activo
-# Objetivo: verificar OOM, DDP, throughput y todos los callbacks
+# Smoke test — real production load, short duration
+# 4 GPUs, batch=32/GPU, full workers, compile enabled
+# Goal: check OOM, DDP, throughput and all callbacks
 devices: 4
 num_nodes: 1
 strategy: ddp_find_unused_parameters_true
@@ -11,6 +11,6 @@ max_steps: 80
 accumulate_grad_batches: 1
 gradient_clip_val: 1.0
 log_every_n_steps: 1
-val_check_interval: 20     # validación cada 20 steps
-limit_train_batches: 20    # epoch = 20 steps → LP eval dispara en step 20, 40, 60, 80
+val_check_interval: 20     # validation every 20 steps
+limit_train_batches: 20    # epoch = 20 steps → LP eval fires at step 20, 40, 60, 80
 limit_val_batches: 8

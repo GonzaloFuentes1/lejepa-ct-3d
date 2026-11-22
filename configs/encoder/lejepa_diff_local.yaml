@@ -1,4 +1,4 @@
-# lejepa_diff_local: LeJEPA + DDPM sobre patch embeddings locales condicionado en contexto
+# lejepa_diff_local: LeJEPA + DDPM over local patch embeddings, conditioned on context
 # Reference: arXiv 2511.08544 + arXiv 2603.19312 (LeWorldModel)
 # Backbone: ViT-Large (~307M params)
 name: lejepa_diff_local

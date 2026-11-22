@@ -1,17 +1,17 @@
 """
 Segmentation-overlay PCA Visualization Callback.
 
-Cada `every_n_steps` pasos loguea a W&B un panel con 3 filas y 3 columnas
-(vistas axial / coronal / sagital):
-  Fila 1: CT en escala de grises
-  Fila 2: PCA features del encoder (interpolación trilinear → suave)
-  Fila 3: Máscara de segmentación coloreada por órgano
+Every `every_n_steps` steps, logs to W&B a panel with 3 rows and 3 columns
+(axial / coronal / sagittal views):
+  Row 1: CT in grayscale
+  Row 2: encoder PCA features (trilinear interpolation → smooth)
+  Row 3: Segmentation mask colored by organ
 
-Si el encoder aprende bien, los colores PCA deberían alinearse con los
-bordes de los órganos sin haber visto ninguna etiqueta durante el pretraining.
+If the encoder learns well, the PCA colors should align with the
+organ boundaries without having seen any label during pretraining.
 
-Usa volúmenes de abdomen_organ_seg (13 órganos: hígado, riñones, bazo...).
-Rota entre `pool_size` volúmenes distintos para ver consistencia.
+Uses volumes from abdomen_organ_seg (13 organs: liver, kidneys, spleen...).
+Rotates across `pool_size` different volumes to check consistency.
 """
 
 from __future__ import annotations
@@ -27,23 +27,23 @@ import torch
 import torch.nn.functional as F
 from pytorch_lightning.callbacks import Callback
 
-# Colores por órgano (BGR ignorado — usamos RGB uint8)
-# 13 órganos + background → paleta distinguible
+# Colors per organ (BGR ignored; we use RGB uint8)
+# 13 organs + background → distinguishable palette
 ORGAN_COLORS = np.array([
-    [0,   0,   0  ],  # 0  background — negro
-    [255, 80,  80 ],  # 1  liver       — rojo
-    [80,  160, 255],  # 2  right-kidney — azul
-    [80,  255, 80 ],  # 3  spleen      — verde
-    [255, 200, 80 ],  # 4  pancreas    — naranja
-    [200, 80,  255],  # 5  aorta       — violeta
+    [0,   0,   0  ],  # 0  background — black
+    [255, 80,  80 ],  # 1  liver       — red
+    [80,  160, 255],  # 2  right-kidney — blue
+    [80,  255, 80 ],  # 3  spleen      — green
+    [255, 200, 80 ],  # 4  pancreas    — orange
+    [200, 80,  255],  # 5  aorta       — violet
     [80,  255, 230],  # 6  ivc         — cyan
-    [255, 255, 80 ],  # 7  rag         — amarillo
-    [180, 255, 120],  # 8  lag         — verde claro
-    [255, 140, 200],  # 9  gallbladder — rosa
-    [120, 200, 255],  # 10 esophagus  — azul claro
-    [255, 180, 120],  # 11 stomach    — salmón
-    [160, 120, 255],  # 12 duodenum   — lila
-    [80,  200, 160],  # 13 left-kidney — turquesa
+    [255, 255, 80 ],  # 7  rag         — yellow
+    [180, 255, 120],  # 8  lag         — light green
+    [255, 140, 200],  # 9  gallbladder — pink
+    [120, 200, 255],  # 10 esophagus  — light blue
+    [255, 180, 120],  # 11 stomach    — salmon
+    [160, 120, 255],  # 12 duodenum   — lilac
+    [80,  200, 160],  # 13 left-kidney — turquoise
 ], dtype=np.uint8)
 
 SEG_DIR = Path(os.environ.get("LEJEPA_DATA_ROOT", "./data")) / "flare_ct_pretrain_full" / "val_downstream" / "abdomen_organ_seg"
@@ -75,13 +75,13 @@ def _build_transforms():
 
 class SegPCAVizCallback(Callback):
     """
-    Loguea visualización PCA + segmentación a W&B cada `every_n_steps` pasos.
+    Logs PCA + segmentation visualization to W&B every `every_n_steps` steps.
 
     Args:
-        seg_dir:        Directorio abdomen_organ_seg/ (contiene imagesVal/ y labelsVal/)
-        every_n_steps:  Frecuencia de logging (default 1000)
-        patch_size:     Patch size del encoder (default 16)
-        pool_size:      Número de volúmenes distintos a rotar (default 4)
+        seg_dir:        Directory abdomen_organ_seg/ (contains imagesVal/ and labelsVal/)
+        every_n_steps:  Logging frequency (default 1000)
+        patch_size:     Encoder patch size (default 16)
+        pool_size:      Number of different volumes to rotate (default 4)
     """
 
     def __init__(
@@ -98,15 +98,15 @@ class SegPCAVizCallback(Callback):
         self.pool_size     = pool_size
 
         self._tfm = None   # lazy init
-        self._pool: list   = []   # lista de (vol_tensor, label_np)
-        self._cases: list  = []   # rutas de casos disponibles
+        self._pool: list   = []   # list of (vol_tensor, label_np)
+        self._cases: list  = []   # available case paths
 
         img_dir = self.seg_dir / "imagesVal"
         lbl_dir = self.seg_dir / "labelsVal"
         if img_dir.exists() and lbl_dir.exists():
             imgs = sorted(img_dir.glob("*.nii.gz"))
             for img_path in imgs:
-                # buscar label correspondiente (mismo stem sin _0000)
+                # find the corresponding label (same stem without _0000)
                 stem = img_path.name.replace("_0000.nii.gz", "")
                 lbl_path = lbl_dir / f"{stem}.nii.gz"
                 if lbl_path.exists():
@@ -115,7 +115,7 @@ class SegPCAVizCallback(Callback):
     # ------------------------------------------------------------------
 
     def _load_case(self, idx: int):
-        """Carga y preprocesa el caso idx → (vol float32 cpu, label int32 cpu)."""
+        """Loads and preprocesses case idx → (vol float32 cpu, label int32 cpu)."""
         if self._tfm is None:
             self._tfm = _build_transforms()
 
@@ -135,7 +135,7 @@ class SegPCAVizCallback(Callback):
 
     @torch.no_grad()
     def _pca_rgb(self, tokens: torch.Tensor) -> np.ndarray:
-        """tokens: (N, D) → (N, 3) float32 en [0,1]."""
+        """tokens: (N, D) → (N, 3) float32 in [0,1]."""
         z = tokens.float()
         z = z - z.mean(0)
         try:
@@ -151,7 +151,7 @@ class SegPCAVizCallback(Callback):
 
     def _seg_rgb(self, label_np: np.ndarray) -> np.ndarray:
         """
-        label_np: (D, H, W) int — convierte a (D, H, W, 3) uint8 con colores por órgano.
+        label_np: (D, H, W) int — converts to (D, H, W, 3) uint8 with per-organ colors.
         """
         label_clipped = np.clip(label_np, 0, len(ORGAN_COLORS) - 1)
         return ORGAN_COLORS[label_clipped]   # (D, H, W, 3)
@@ -169,7 +169,7 @@ class SegPCAVizCallback(Callback):
         P = self.patch_size
         D, H, W = vol.shape[1], vol.shape[2], vol.shape[3]
 
-        # PCA trilinear → suave
+        # PCA trilinear → smooth
         pca_rgb  = self._pca_rgb(tokens)                          # (N, 3)
         pca_vol  = pca_rgb.reshape(Gd, Gh, Gw, 3)
         pca_t    = torch.from_numpy(pca_vol).permute(3, 0, 1, 2).unsqueeze(0)  # (1,3,Gd,Gh,Gw)
@@ -178,7 +178,7 @@ class SegPCAVizCallback(Callback):
 
         ct_np    = vol.squeeze(0).numpy()                         # (D, H, W)
 
-        # Segmentación coloreada (resize al mismo espacio que vol)
+        # Colored segmentation (resize to the same space as vol)
         lbl_np   = label.squeeze(0).numpy().astype(np.int32)      # (D, H, W)
         if lbl_np.shape != (D, H, W):
             lbl_t  = torch.from_numpy(lbl_np).unsqueeze(0).unsqueeze(0).float()

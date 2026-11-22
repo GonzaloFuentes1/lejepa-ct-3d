@@ -23,9 +23,9 @@ mask_ratio: 0.75
 n_target_blocks: 4
 
 # EMA cosine schedule: τ_start → τ_end (DINOv2 / MAE-v2 style)
-# τ_start: updates frecuentes cuando representaciones son caóticas (inicio)
-# τ_end: targets más estables cuando representaciones convergen (final)
-ema_momentum: 0.999           # Legacy — usado si no hay start/end
+# τ_start: frequent updates while representations are chaotic (start)
+# τ_end: more stable targets once representations converge (end)
+ema_momentum: 0.999           # Legacy, used if there is no start/end
 ema_momentum_start: 0.996
 ema_momentum_end: 0.9999
 

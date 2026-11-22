@@ -1,25 +1,25 @@
 """
-Extracción de features para evaluación LP local.
+Feature extraction for local LP evaluation.
 
-Procesa todos los splits (train/val/test) de un dataset downstream y guarda
-embeddings .h5 compatibles con train_linear_probe.py e inference.py de CT-NEXUS.
+Processes all splits (train/val/test) of a downstream dataset and saves
+embeddings .h5 compatible with CT-NEXUS train_linear_probe.py and inference.py.
 
-Estructura de salida:
+Output structure:
     output_dir/
         <dataset>/
             <task>/
                 train/<caseid>.h5
                 val/<caseid>.h5
-                test/<caseid>.h5   (si existe)
+                test/<caseid>.h5   (if present)
 
-Uso:
-    # Todas las tareas AMOS (non-ROI + ROI)
+Usage:
+    # All AMOS tasks (non-ROI + ROI)
     python scripts/eval_extract_features.py \\
         --ckpt checkpoints/lejepa_best.ckpt \\
         --downstream_root $LEJEPA_DATA_ROOT/cvpr26_downstream \\
         --output_dir $LEJEPA_DATA_ROOT/lejepa_embeddings
 
-    # Solo una tarea
+    # A single task
     python scripts/eval_extract_features.py \\
         --ckpt checkpoints/lejepa_best.ckpt \\
         --downstream_root $LEJEPA_DATA_ROOT/cvpr26_downstream \\
@@ -53,16 +53,16 @@ from monai.transforms import (
 from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
-# Configuración del encoder (debe coincidir con el checkpoint)
+# Encoder configuration (must match the checkpoint)
 # ---------------------------------------------------------------------------
 PATCH_SIZE  = 16
 SPACING     = (1.5, 1.5, 1.5)
 HU_MIN      = -1000.0
 HU_MAX      = 1000.0
-VOLUME_SIZE = (128, 128, 128)  # 192mm FOV @ 1.5mm — debe coincidir con pretraining
+VOLUME_SIZE = (128, 128, 128)  # 192mm FOV @ 1.5mm — must match pretraining
 
 # ---------------------------------------------------------------------------
-# Tareas downstream y si usan ROI masking
+# Downstream tasks and whether they use ROI masking
 # ---------------------------------------------------------------------------
 TASKS_AMOS = {
     # task_name: uses_roi_mask
@@ -130,9 +130,9 @@ def _build_mask_transforms() -> Compose:
 @torch.no_grad()
 def _encode(encoder, volume: torch.Tensor, mask: torch.Tensor | None, device) -> np.ndarray:
     """
-    Encode un volumen (1,C,D,H,W) y retorna embedding (out_dim=2048,).
-    encoder.forward() ya aplica proj_head per-token → tokens son out_dim directamente.
-    project() hace solo mean pool (con ROI masking opcional).
+    Encodes a (1,C,D,H,W) volume and returns an embedding (out_dim=2048,).
+    encoder.forward() already applies proj_head per token → tokens are out_dim directly.
+    project() only does mean pooling (with optional ROI masking).
     """
     volume = volume.to(device)
     tokens = encoder(volume)  # (1, N, out_dim=2048)
@@ -150,7 +150,7 @@ def _encode(encoder, volume: torch.Tensor, mask: torch.Tensor | None, device) ->
 
 
 def _load_encoder(ckpt_path: str, device: torch.device, fp16: bool = False):
-    """Carga el ViT3D desde un Lightning checkpoint."""
+    """Loads the ViT3D from a Lightning checkpoint."""
     repo_root = Path(__file__).parent.parent
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
@@ -176,7 +176,7 @@ def extract_dataset(
     fp16: bool,
     splits: list[str] | None = None,
 ) -> None:
-    """Extrae features para todos los splits de una tarea."""
+    """Extracts features for all splits of a task."""
     img_dir   = dataset_dir / "images"
     mask_dir  = dataset_dir / "fg_masks" / task if uses_roi else None
     labels_df_path = dataset_dir / "labels" / f"{task}.csv"
@@ -188,7 +188,7 @@ def extract_dataset(
     import pandas as pd
     df = pd.read_csv(labels_df_path)
 
-    # Detectar splits disponibles
+    # Detect available splits
     available_splits = df["split"].unique() if "split" in df.columns else ["train"]
     if splits:
         available_splits = [s for s in available_splits if s in splits]
@@ -208,14 +208,14 @@ def extract_dataset(
             case_id = row["case_id"]
             out_h5 = out_split_dir / case_id.replace(".nii.gz", ".h5")
             if out_h5.exists():
-                continue  # skip si ya está extraído
+                continue  # skip if already extracted
 
             img_path = img_dir / case_id
             if not img_path.exists():
-                pbar.write(f"    [warn] imagen no encontrada: {img_path}")
+                pbar.write(f"    [warn] image not found: {img_path}")
                 continue
 
-            # Cargar imagen
+            # Load image
             try:
                 img_data = img_tfm({"image": str(img_path)})
                 vol = img_data["image"].unsqueeze(0)  # (1,1,D,H,W)
@@ -225,7 +225,7 @@ def extract_dataset(
                 pbar.write(f"    [error] {case_id}: {e}")
                 continue
 
-            # Cargar máscara ROI (opcional)
+            # Load ROI mask (optional)
             mask = None
             if uses_roi and msk_tfm is not None:
                 mask_path = mask_dir / case_id
@@ -236,7 +236,7 @@ def extract_dataset(
                     except Exception as e:
                         pbar.write(f"    [warn] mask error {case_id}: {e}")
 
-            # Extraer embedding
+            # Extract embedding
             emb = _encode(encoder, vol, mask, device)
 
             # Guardar
@@ -247,22 +247,22 @@ def extract_dataset(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="LeJEPA LP feature extractor para evaluación local")
+    ap = argparse.ArgumentParser(description="LeJEPA LP feature extractor for local evaluation")
     ap.add_argument("--ckpt",             required=True,  help="Lightning checkpoint (.ckpt)")
-    ap.add_argument("--downstream_root",  required=True,  help="Root dir del dataset downstream")
-    ap.add_argument("--output_dir",       required=True,  help="Donde guardar los embeddings .h5")
-    ap.add_argument("--tasks",            nargs="*",      help="Lista de tareas a extraer (default: todas)")
-    ap.add_argument("--splits",           nargs="*",      default=None, help="Splits (default: todos)")
+    ap.add_argument("--downstream_root",  required=True,  help="Root dir of the downstream dataset")
+    ap.add_argument("--output_dir",       required=True,  help="Where to save the .h5 embeddings")
+    ap.add_argument("--tasks",            nargs="*",      help="List of tasks to extract (default: all)")
+    ap.add_argument("--splits",           nargs="*",      default=None, help="Splits (default: all)")
     ap.add_argument("--device",           default="cuda")
     ap.add_argument("--fp16",             action="store_true")
     args = ap.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-    print(f"Cargando encoder desde {args.ckpt} ...")
+    print(f"Loading encoder from {args.ckpt} ...")
     encoder = _load_encoder(args.ckpt, device, args.fp16)
     embed_dim = encoder.embed_dim
-    print(f"Encoder cargado. embed_dim={embed_dim}")
+    print(f"Encoder loaded. embed_dim={embed_dim}")
 
     downstream_root = Path(args.downstream_root)
     output_dir      = Path(args.output_dir)
@@ -271,7 +271,7 @@ def main() -> None:
     for dataset_name, tasks_map in DATASET_TASKS.items():
         dataset_dir = downstream_root / dataset_name
         if not dataset_dir.exists():
-            print(f"[skip] dataset no encontrado: {dataset_dir}")
+            print(f"[skip] dataset not found: {dataset_dir}")
             continue
 
         print(f"\n=== {dataset_name} ===")
@@ -280,7 +280,7 @@ def main() -> None:
         for task, uses_roi in tasks_map.items():
             if args.tasks and task not in args.tasks:
                 continue
-            print(f"  Tarea: {task} (ROI={'sí' if uses_roi else 'no'})")
+            print(f"  Task: {task} (ROI={'yes' if uses_roi else 'no'})")
             extract_dataset(
                 encoder=encoder,
                 dataset_dir=dataset_dir,
@@ -292,7 +292,7 @@ def main() -> None:
                 splits=args.splits,
             )
 
-    print("\nExtracción completada.")
+    print("\nExtraction completed.")
 
 
 if __name__ == "__main__":

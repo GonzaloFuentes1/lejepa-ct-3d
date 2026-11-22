@@ -1,20 +1,20 @@
 """
-Evaluación local de Linear Probing — replica el pipeline de la competición CVPR 2026.
+Local Linear Probing evaluation: replicates the CVPR 2026 competition pipeline.
 
-Pasos:
-  1. Extrae embeddings de todos los volúmenes AMOS (cacheados en --feat_dir)
-  2. Por cada tarea: LogisticRegression(train) → BalAcc + AUROC(val)
-  3. Imprime tabla comparativa con los baselines de la competición
+Steps:
+  1. Extracts embeddings of all AMOS volumes (cached in --feat_dir)
+  2. For each task: LogisticRegression(train) → BalAcc + AUROC(val)
+  3. Prints a comparison table against the competition baselines
 
-Uso:
-    # Extraer features + evaluar LP (primera vez)
+Usage:
+    # Extract features + evaluate LP (first time)
     python scripts/run_local_lp.py \\
         --ckpt checkpoints/best.ckpt \\
         --data_dir $LEJEPA_DATA_ROOT/cvpr26_downstream/AMOS-clf-tr-val \\
         --feat_dir $LEJEPA_DATA_ROOT/cvpr26_lp_feats \\
         --device cuda:0
 
-    # Solo evaluar LP (features ya extraídas)
+    # Evaluate LP only (features already extracted)
     python scripts/run_local_lp.py \\
         --feat_dir $LEJEPA_DATA_ROOT/cvpr26_lp_feats \\
         --data_dir $LEJEPA_DATA_ROOT/cvpr26_downstream/AMOS-clf-tr-val
@@ -57,7 +57,7 @@ ROI_TASKS = {
     "liver_lesion", "renal_cyst", "splenomegaly",
 }
 
-# BalAcc baseline de referencia (Curia — mejor baseline público AMOS)
+# Reference baseline BalAcc (Curia, best public AMOS baseline)
 CURIA_BALACC = {
     "adrenal_hyperplasia": 0.786, "ascites": 0.750, "atherosclerosis": 0.809,
     "cholecystitis": 0.755, "colorectal_cancer": 0.750, "fatty_liver": 0.949,
@@ -93,7 +93,7 @@ def _build_mask_transforms() -> Compose:
 
 @torch.no_grad()
 def _extract_one(encoder, vol, mask, device) -> np.ndarray:
-    """Encoda un volumen → embedding 1-D (out_dim,)."""
+    """Encodes a volume → 1-D embedding (out_dim,)."""
     tokens = encoder(vol).squeeze(0)  # (N, embed_dim)
     roi_mask = None
     if mask is not None:
@@ -111,8 +111,8 @@ def extract_features(
     device: torch.device,
     fp16: bool = True,
 ) -> None:
-    """Extrae embeddings para todos los volúmenes AMOS y los guarda en feat_dir."""
-    print(f"Cargando checkpoint: {ckpt}")
+    """Extracts embeddings for all AMOS volumes and saves them in feat_dir."""
+    print(f"Loading checkpoint: {ckpt}")
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from models.encoder.lejepa_module import LeJEPAModule
 
@@ -131,12 +131,12 @@ def extract_features(
     mask_root = data_dir / "fg_masks"
 
     cases = sorted(img_dir.glob("*.nii.gz"))
-    print(f"Extrayendo features de {len(cases)} volúmenes...")
+    print(f"Extracting features from {len(cases)} volumes...")
 
     feat_dir.mkdir(parents=True, exist_ok=True)
 
-    # Extraer por tarea ROI para masked pooling correcto
-    # Primero extraemos global (sin ROI) para tareas non-ROI
+    # Extract per ROI task for correct masked pooling
+    # First extract global (no ROI) for non-ROI tasks
     global_dir = feat_dir / "global"
     global_dir.mkdir(exist_ok=True)
 
@@ -160,7 +160,7 @@ def extract_features(
         except Exception as e:
             print(f" ✗ {e}")
 
-    # Extraer por cada tarea ROI con masked pooling
+    # Extract for each ROI task with masked pooling
     for task in ROI_TASKS:
         task_mask_dir = mask_root / task
         if not task_mask_dir.exists():
@@ -168,7 +168,7 @@ def extract_features(
 
         task_feat_dir = feat_dir / task
         task_feat_dir.mkdir(exist_ok=True)
-        print(f"\nExtraendo con ROI mask: {task}")
+        print(f"\nExtracting with ROI mask: {task}")
 
         for i, case_path in enumerate(cases, 1):
             case_id  = case_path.name.replace(".nii.gz", "")
@@ -178,7 +178,7 @@ def extract_features(
 
             mask_path = task_mask_dir / case_path.name
             if not mask_path.exists():
-                # Sin máscara → copiar global
+                # No mask → copy global
                 global_h5 = global_dir / f"{case_id}.h5"
                 if global_h5.exists():
                     import shutil
@@ -204,7 +204,7 @@ def extract_features(
 
 
 def load_task_data(task: str, data_dir: Path, feat_dir: Path):
-    """Carga (X_train, y_train, X_val, y_val) para una tarea."""
+    """Loads (X_train, y_train, X_val, y_val) for a task."""
     label_csv = data_dir / "labels" / f"{task}.csv"
     feat_subdir = feat_dir / task if task in ROI_TASKS else feat_dir / "global"
 
@@ -219,7 +219,7 @@ def load_task_data(task: str, data_dir: Path, feat_dir: Path):
             feat_path = feat_subdir / f"{case_id}.h5"
 
             if not feat_path.exists():
-                # Fallback a global
+                # Fall back to global
                 feat_path = feat_dir / "global" / f"{case_id}.h5"
             if not feat_path.exists():
                 continue
@@ -241,19 +241,19 @@ def load_task_data(task: str, data_dir: Path, feat_dir: Path):
 
 
 def run_lp(data_dir: Path, feat_dir: Path) -> dict:
-    """Entrena LP por tarea y devuelve métricas."""
+    """Trains LP per task and returns metrics."""
     results = {}
 
     for task in TASKS:
         label_csv = data_dir / "labels" / f"{task}.csv"
         if not label_csv.exists():
-            print(f"  SKIP {task}: CSV no encontrado")
+            print(f"  SKIP {task}: CSV not found")
             continue
 
         try:
             X_tr, y_tr, X_val, y_val = load_task_data(task, data_dir, feat_dir)
             if len(X_tr) == 0 or len(X_val) == 0:
-                print(f"  SKIP {task}: sin features")
+                print(f"  SKIP {task}: no features")
                 continue
 
             scaler = StandardScaler()
@@ -287,7 +287,7 @@ def run_lp(data_dir: Path, feat_dir: Path) -> dict:
 
 
 def print_table(results: dict) -> None:
-    """Imprime tabla con comparación vs Curia (mejor baseline AMOS)."""
+    """Prints a table comparing against Curia (best AMOS baseline)."""
     header = f"{'Task':<25} {'BalAcc':>7} {'AUROC':>7} {'Curia':>7} {'Δ':>7} {'n_tr':>6} {'n_val':>6}"
     print("\n" + "=" * len(header))
     print(header)
@@ -324,12 +324,12 @@ def print_table(results: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Local LP eval — CVPR 2026 Task 1")
-    ap.add_argument("--ckpt",     default=None, help="Checkpoint .ckpt (omitir si features ya extraídas)")
+    ap.add_argument("--ckpt",     default=None, help="Checkpoint .ckpt (omit if features are already extracted)")
     ap.add_argument("--data_dir", required=True, help="AMOS-clf-tr-val root")
-    ap.add_argument("--feat_dir", required=True, help="Dir para cachear .h5 features")
+    ap.add_argument("--feat_dir", required=True, help="Dir to cache .h5 features")
     ap.add_argument("--device",   default="cuda:0")
     ap.add_argument("--fp16",     action="store_true", default=True)
-    ap.add_argument("--skip_extract", action="store_true", help="No extraer features, solo LP")
+    ap.add_argument("--skip_extract", action="store_true", help="Do not extract features, LP only")
     args = ap.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -339,10 +339,10 @@ def main() -> None:
     if not args.skip_extract and args.ckpt:
         extract_features(args.ckpt, data_dir, feat_dir, device, fp16=args.fp16)
     elif not args.skip_extract and not args.ckpt:
-        print("Pasa --ckpt o --skip_extract si las features ya están extraídas.")
+        print("Pass --ckpt or --skip_extract if the features are already extracted.")
         return
 
-    print("\nEntrenando Linear Probes...")
+    print("\nTraining Linear Probes...")
     results = run_lp(data_dir, feat_dir)
     print_table(results)
 

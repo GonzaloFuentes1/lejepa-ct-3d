@@ -259,10 +259,10 @@ class LeJEPAModule(pl.LightningModule):
         tgt_ids: torch.Tensor,
     ) -> torch.Tensor:
         """LeJEPA: JEPA prediction loss + SIGReg (no EMA, no stop-gradient, no VCReg)."""
-        # Dos llamadas separadas con shapes fijas → CUDAGraphs activos con torch.compile
+        # Two separate calls with fixed shapes → CUDAGraphs active with torch.compile
         ctx_emb = self.encoder(x, ctx_ids)                       # (B, N_ctx, embed_dim)
         tgt_emb = self.encoder(x, tgt_ids)                       # (B, N_tgt, embed_dim)
-        all_emb = torch.cat([ctx_emb, tgt_emb], dim=1)          # para SIGReg y logging
+        all_emb = torch.cat([ctx_emb, tgt_emb], dim=1)          # for SIGReg and logging
 
         pred_emb = self.predictor(ctx_emb, ctx_ids, tgt_ids)  # (B, N_tgt, out_dim)
 

@@ -1,15 +1,15 @@
 """
-Tabla comparativa de resultados LP contra baselines de la competencia CVPR 2026.
+Comparison table of LP results against the CVPR 2026 competition baselines.
 
-Lee los resultados de train_linear_probe.py y genera una tabla comparativa
-con los baselines publicados (CT-NEXUS, 3DINO, SPECTRE, Curia, Merlin, VoCo, CT-FM, Pillar-0).
+Reads the results of train_linear_probe.py and generates a comparison table
+with the published baselines (CT-NEXUS, 3DINO, SPECTRE, Curia, Merlin, VoCo, CT-FM, Pillar-0).
 
-Uso:
+Usage:
     python scripts/compare_baselines.py \\
         --lp_results_root $LEJEPA_DATA_ROOT/lejepa_eval/lp_results \\
         --output          $LEJEPA_DATA_ROOT/lejepa_eval/comparison_table.csv
 
-    # Solo AUROC
+    # AUROC only
     python scripts/compare_baselines.py \\
         --lp_results_root $LEJEPA_DATA_ROOT/lejepa_eval/lp_results \\
         --metric          auroc
@@ -25,8 +25,8 @@ import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Baselines publicados — Task 1 LP (BalAcc / AUROC)
-# Fuente: https://www.codabench.org/competitions/12650/ — Baselines section
+# Published baselines — Task 1 LP (BalAcc / AUROC)
+# Source: https://www.codabench.org/competitions/12650/ — Baselines section
 # ---------------------------------------------------------------------------
 BASELINES_LP_BAL_ACC = {
     "CT-NEXUS": {
@@ -171,11 +171,11 @@ TASKS_ORDER = [
 
 
 def load_lejepa_results(lp_results_root: Path, metric: str = "bal_acc") -> dict[str, float]:
-    """Lee los JSON de resultados de train_linear_probe.py."""
+    """Reads the result JSONs of train_linear_probe.py."""
     results = {}
     metric_key = f"test_balanced_acc" if metric == "bal_acc" else f"test_auroc"
 
-    # Buscar en todos los subdirectorios de dataset
+    # Search all dataset subdirectories
     for dataset_dir in lp_results_root.iterdir():
         if not dataset_dir.is_dir():
             continue
@@ -207,7 +207,7 @@ def build_comparison_table(lejepa_results: dict, metric: str = "bal_acc") -> pd.
 
     df = pd.DataFrame(rows).set_index("Task")
 
-    # Fila de medias
+    # Mean row
     mean_row = df.mean(skipna=True)
     mean_row.name = "MEAN"
     df = pd.concat([df, mean_row.to_frame().T])
@@ -221,14 +221,14 @@ def print_table(df: pd.DataFrame, metric: str) -> None:
     print(f"Task 1 LP — {metric_label} comparison")
     print(f"{'='*100}")
 
-    # Cabecera
+    # Header
     models = list(df.columns)
     header = f"{'Task':<25}" + "".join(f"{m:>10}" for m in models)
     print(header)
     print("-" * len(header))
 
     for task, row in df.iterrows():
-        # Resaltar el mejor no-baseline si LeJEPA supera a algún baseline
+        # Highlight the best non-baseline if LeJEPA beats any baseline
         lejepa_val = row.get("LeJEPA (ours)", float("nan"))
         best_baseline = max(
             (v for k, v in row.items() if k != "LeJEPA (ours)" and not np.isnan(v)),
@@ -243,13 +243,13 @@ def print_table(df: pd.DataFrame, metric: str) -> None:
         print(f"{bold}{str(task):<24}{values}{marker}")
 
     print(f"{'='*100}")
-    print("★ = LeJEPA supera al mejor baseline en esa tarea")
+    print("★ = LeJEPA beats the best baseline on that task")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Comparar LeJEPA LP vs baselines CVPR 2026")
-    ap.add_argument("--lp_results_root", required=True, help="Root dir con resultados de train_linear_probe.py")
-    ap.add_argument("--output",          default=None,  help="CSV de salida (opcional)")
+    ap = argparse.ArgumentParser(description="Compare LeJEPA LP vs CVPR 2026 baselines")
+    ap.add_argument("--lp_results_root", required=True, help="Root dir with train_linear_probe.py results")
+    ap.add_argument("--output",          default=None,  help="Output CSV (optional)")
     ap.add_argument("--metric",          default="bal_acc", choices=["bal_acc", "auroc"])
     args = ap.parse_args()
 
@@ -257,10 +257,10 @@ def main() -> None:
 
     lejepa_results = load_lejepa_results(lp_results_root, args.metric)
     if not lejepa_results:
-        print(f"[warn] No se encontraron resultados de LeJEPA en {lp_results_root}")
-        print("       Ejecuta primero train_linear_probe.py")
+        print(f"[warn] No LeJEPA results found in {lp_results_root}")
+        print("       Run train_linear_probe.py first")
     else:
-        print(f"Resultados LeJEPA cargados: {len(lejepa_results)} tareas")
+        print(f"LeJEPA results loaded: {len(lejepa_results)} tasks")
 
     df_bal = build_comparison_table(lejepa_results if args.metric == "bal_acc" else {}, "bal_acc")
     df_auc = build_comparison_table(lejepa_results if args.metric == "auroc"   else lejepa_results, "auroc")
@@ -271,10 +271,10 @@ def main() -> None:
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        # Guardar ambas métricas
+        # Save both metrics
         df_bal.to_csv(output_path.with_name(output_path.stem + "_bal_acc.csv"))
         df_auc.to_csv(output_path.with_name(output_path.stem + "_auroc.csv"))
-        print(f"\nTablas guardadas en {output_path.parent}/")
+        print(f"\nTables saved to {output_path.parent}/")
 
 
 if __name__ == "__main__":
